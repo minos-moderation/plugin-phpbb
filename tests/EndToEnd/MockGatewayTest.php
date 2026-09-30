@@ -79,7 +79,7 @@ final class MockGatewayTest extends TestCase
 		));
 
 		$posts = array();
-		foreach (array(
+		foreach ($texts = array(
 			'safe'      => 'Testowy wpis o pogodzie.',
 			'blocked'   => 'Testowy wpis [minos:blokuj] [minos:kategoria=nekanie]',
 			'masked'    => 'Testowy wpis ze [[słowem]] do ukrycia [minos:cenzuruj] [minos:kategoria=wulgaryzmy]',
@@ -105,8 +105,11 @@ final class MockGatewayTest extends TestCase
 		self::assertSame('nekanie', $board->row($posts['blocked'])['categories']);
 
 		self::assertSame(pending_store::MASKED, $board->row($posts['masked'])['status']);
-		self::assertStringContainsString('██████', $board->post($posts['masked'])['post_text']);
-		self::assertStringNotContainsString('słowem', $board->post($posts['masked'])['post_text']);
+		$sent = $texts['masked'];
+		$masked = $board->row($posts['masked'])['masked_text'];
+		self::assertSame(mb_strlen($sent, 'UTF-8'), mb_strlen($masked, 'UTF-8'), 'the masked text keeps the sent text\'s length');
+		self::assertSame(str_replace('słowem', '██████', $sent), $masked);
+		self::assertSame($board->xml($masked), $board->post($posts['masked'])['post_text']);
 
 		self::assertSame('nieocenione', $board->row($posts['unassessed'])['verdict']);
 		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($posts['unassessed'])['post_visibility'], 'the default fail-closed');
