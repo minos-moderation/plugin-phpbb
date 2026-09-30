@@ -1,0 +1,328 @@
+<?php
+/**
+ *
+ * Minos post moderation. An extension for the phpBB Forum Software package.
+ *
+ * @copyright (c) 2026 Minos
+ * @license GNU General Public License, version 2 (GPL-2.0)
+ *
+ */
+
+namespace minos\moderation\platform;
+
+/**
+ * Every operation the extension performs on phpBB's posts, in one place.
+ *
+ * The rest of the extension decides; this class carries a decision out with phpBB's own
+ * services, the way the moderator control panel does (`includes/mcp/mcp_queue.php`,
+ * `approve_posts`), so topic and forum counters, the last-post data and the notifications
+ * stay consistent. It is also the one class to check when phpBB changes.
+ */
+class forum
+{
+	/** The longest text the gateway accepts, in characters. */
+	const MAX_CHARS = 3000;
+
+	/** The largest `meta.links` value the gateway keeps. */
+	const MAX_LINKS = 100000;
+
+	/** @var \phpbb\db\driver\driver_interface */
+	protected $db;
+
+	/** @var \phpbb\content_visibility */
+	protected $visibility;
+
+	/** @var \phpbb\notification\manager */
+	protected $notifications;
+
+	/** @var \phpbb\textformatter\utils_interface */
+	protected $text_utils;
+
+	/** @var \phpbb\textformatter\parser_interface */
+	protected $parser;
+
+	/** @var \phpbb\log\log_interface */
+	protected $log;
+
+	/** @var \phpbb\language\language */
+	protected $language;
+
+	/** @var string */
+	protected $posts_table;
+
+	/** @var string */
+	protected $topics_table;
+
+	/** @var string */
+	protected $forums_table;
+
+	/** @var string */
+	protected $users_table;
+
+	/**
+	 * @param \phpbb\db\driver\driver_interface     $db            The database.
+	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
+	 * @param \phpbb\notification\manager           $notifications Notifications.
+	 * @param \phpbb\textformatter\utils_interface  $text_utils    Stored text → plain text.
+	 * @param \phpbb\textformatter\parser_interface $parser        Plain text → stored text.
+	 * @param \phpbb\log\log_interface              $log           The moderator and error logs.
+	 * @param \phpbb\language\language              $language      For the soft-delete reason.
+	 * @param string                                $posts_table   Table names.
+	 * @param string                                $topics_table
+	 * @param string                                $forums_table
+	 * @param string                                $users_table
+	 */
+	public function __construct(
+		\phpbb\db\driver\driver_interface $db,
+		\phpbb\content_visibility $visibility,
+		\phpbb\notification\manager $notifications,
+		\phpbb\textformatter\utils_interface $text_utils,
+		\phpbb\textformatter\parser_interface $parser,
+		\phpbb\log\log_interface $log,
+		\phpbb\language\language $language,
+		$posts_table,
+		$topics_table,
+		$forums_table,
+		$users_table
+	)
+	{
+		$this->db = $db;
+		$this->visibility = $visibility;
+		$this->notifications = $notifications;
+		$this->text_utils = $text_utils;
+		$this->parser = $parser;
+		$this->log = $log;
+		$this->language = $language;
+		$this->posts_table = $posts_table;
+		$this->topics_table = $topics_table;
+		$this->forums_table = $forums_table;
+		$this->users_table = $users_table;
+	}
+
+	/**
+	 * The words of a stored post, as the gateway should read them.
+	 *
+	 * Quotes are removed with their content: they are someone else's words, assessed with
+	 * their own post, and a reply must not be held for what it quotes. The rest loses its
+	 * formatting (BBCode, links, smilies stay as their text). The text is NOT shortened here.
+	 *
+	 * @param string $xml The stored text (`post_text`).
+	 * @return string The plain text, trimmed.
+	 */
+	public function plain_text($xml)
+	{
+		$xml = (string) $xml;
+		if ($xml === '')
+		{
+			return '';
+		}
+		$text = (string) $this->text_utils->clean_formatting($this->text_utils->remove_bbcode($xml, 'quote'));
+		$text = str_replace(array("\r\n", "\r"), "\n", $text);
+		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
+		return is_string($trimmed) ? $trimmed : trim($text);
+	}
+
+	/**
+	 * The first {@see MAX_CHARS} characters of a plain text, the part the gateway assesses.
+	 *
+	 * @param string $text A plain text.
+	 * @return string
+	 */
+	public static function first_chars($text)
+	{
+		if (mb_strlen($text, 'UTF-8') <= self::MAX_CHARS)
+		{
+			return $text;
+		}
+		return rtrim(mb_substr($text, 0, self::MAX_CHARS, 'UTF-8'));
+	}
+
+	/**
+	 * Whether a plain text is longer than the part the gateway assesses.
+	 *
+	 * @param string $text A plain text.
+	 * @return bool
+	 */
+	public static function is_cut($text)
+	{
+		return mb_strlen($text, 'UTF-8') > self::MAX_CHARS;
+	}
+
+	/**
+	 * The spam signals the gateway may receive about a post, and nothing else: the number of
+	 * links and, for a registered author, whether this is the author's first post. Never an
+	 * e-mail, an IP address or a user id.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return array<string,int|bool>
+	 */
+	public function meta(array $post)
+	{
+		$meta = array('links' => min(self::MAX_LINKS, (int) preg_match_all('#<URL[\s>]#', (string) $post['post_text'])));
+		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
+		{
+			// The post itself is unapproved, so it is not counted in user_posts yet.
+			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
+		}
+		return $meta;
+	}
+
+	/**
+	 * A post with the topic, forum and author data the operations below need.
+	 *
+	 * @param int $post_id The post.
+	 * @return array<string,mixed>|null Null when the post does not exist.
+	 */
+	public function load_post($post_id)
+	{
+		$sql = 'SELECT p.*, t.topic_title, t.topic_first_post_id, t.topic_last_post_id, t.topic_time,
+				t.topic_last_post_time, t.topic_posts_approved, f.forum_name, u.username, u.user_posts
+			FROM ' . $this->posts_table . ' p
+			INNER JOIN ' . $this->topics_table . ' t ON t.topic_id = p.topic_id
+			LEFT JOIN ' . $this->forums_table . ' f ON f.forum_id = p.forum_id
+			LEFT JOIN ' . $this->users_table . ' u ON u.user_id = p.poster_id
+			WHERE p.post_id = ' . (int) $post_id;
+		$result = $this->db->sql_query($sql);
+		$row = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $row ? $row : null;
+	}
+
+	/**
+	 * Whether a post is still in the approval queue as the extension left it.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return bool
+	 */
+	public function awaits_approval(array $post)
+	{
+		return (int) $post['post_visibility'] === ITEM_UNAPPROVED;
+	}
+
+	/**
+	 * Approves a post held in the queue, as a moderator's approval would, and sends the
+	 * notifications phpBB withheld while it waited (the author is not notified: from their
+	 * side the post simply appears).
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return void
+	 */
+	public function approve(array $post)
+	{
+		$this->set_visibility(ITEM_APPROVED, $post, '');
+
+		if (!(int) $post['topic_posts_approved'])
+		{
+			$this->notifications->delete_notifications('notification.type.topic_in_queue', (int) $post['topic_id']);
+			$this->notifications->add_notifications(array('notification.type.topic'), $post);
+		}
+		else
+		{
+			$this->notifications->add_notifications(array(
+				'notification.type.bookmark',
+				'notification.type.post',
+			), $post);
+		}
+		$this->notifications->add_notifications(array('notification.type.quote'), $post);
+		$this->notifications->delete_notifications('notification.type.post_in_queue', (int) $post['post_id']);
+	}
+
+	/**
+	 * Soft-deletes a post held in the queue.
+	 *
+	 * phpBB's `content_visibility` accounts only an approved → deleted change: applied to an
+	 * unapproved post, it would lower post counts that were never raised. The post is
+	 * therefore approved and then deleted, without any notification; the caller runs both in
+	 * one transaction, so no reader sees it approved.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return void
+	 */
+	public function soft_delete(array $post)
+	{
+		$this->language->add_lang('common', 'minos/moderation');
+		$this->set_visibility(ITEM_APPROVED, $post, '');
+		$this->set_visibility(ITEM_DELETED, $post, $this->language->lang('MINOS_DELETE_REASON'));
+
+		$this->notifications->delete_notifications('notification.type.topic_in_queue', (int) $post['topic_id']);
+		$this->notifications->delete_notifications('notification.type.post_in_queue', (int) $post['post_id']);
+	}
+
+	/**
+	 * Replaces a post's text with a plain text (the gateway's `ocenzurowany`).
+	 *
+	 * The text is parsed with BBCode, smilies and automatic links switched off, so what the
+	 * gateway returned is shown exactly as returned.
+	 *
+	 * @param array<string,mixed> $post  A row from {@see load_post}.
+	 * @param string              $plain The new text.
+	 * @return array<string,mixed> The post with its new text.
+	 */
+	public function replace_text(array $post, $plain)
+	{
+		$this->parser->disable_bbcodes();
+		$this->parser->disable_smilies();
+		$this->parser->disable_magic_url();
+		$xml = (string) $this->parser->parse((string) $plain);
+		$this->parser->enable_bbcodes();
+		$this->parser->enable_smilies();
+		$this->parser->enable_magic_url();
+
+		$this->db->sql_query('UPDATE ' . $this->posts_table . ' SET ' . $this->db->sql_build_array('UPDATE', array(
+			'post_text'       => $xml,
+			'bbcode_uid'      => '',
+			'bbcode_bitfield' => '',
+			'post_checksum'   => md5((string) $plain),
+		)) . ' WHERE post_id = ' . (int) $post['post_id']);
+
+		$post['post_text'] = $xml;
+		return $post;
+	}
+
+	/**
+	 * Writes what the extension did with a post into the moderator log.
+	 *
+	 * @param array<string,mixed> $post      A row from {@see load_post}.
+	 * @param string              $operation A `LOG_MINOS_*` language key.
+	 * @return void
+	 */
+	public function log_decision(array $post, $operation)
+	{
+		$this->log->add('mod', ANONYMOUS, '', $operation, false, array(
+			'forum_id' => (int) $post['forum_id'],
+			'topic_id' => (int) $post['topic_id'],
+			'post_id'  => (int) $post['post_id'],
+			(string) $post['post_subject'],
+		));
+	}
+
+	/**
+	 * Writes a refusal of the gateway into the error log: the status and the code only, never
+	 * the key, the text or the response body.
+	 *
+	 * @param int    $status The HTTP status.
+	 * @param string $code   A safe label.
+	 * @return void
+	 */
+	public function log_refusal($status, $code)
+	{
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_GATEWAY_REFUSED', false, array((int) $status, (string) $code));
+	}
+
+	/**
+	 * Changes one post's visibility with the first/last-post flags the MCP would compute.
+	 *
+	 * @param int                 $visibility ITEM_APPROVED or ITEM_DELETED.
+	 * @param array<string,mixed> $post       A row from {@see load_post}.
+	 * @param string              $reason     The reason stored with a deletion.
+	 * @return void
+	 */
+	protected function set_visibility($visibility, array $post, $reason)
+	{
+		$post_id = (int) $post['post_id'];
+		$is_starter = $post_id <= (int) $post['topic_first_post_id'] || (int) $post['post_time'] <= (int) $post['topic_time'];
+		$is_latest = $post_id >= (int) $post['topic_last_post_id'] || (int) $post['post_time'] >= (int) $post['topic_last_post_time'];
+		$this->visibility->set_post_visibility($visibility, array($post_id), (int) $post['topic_id'], (int) $post['forum_id'],
+			ANONYMOUS, time(), $reason, $is_starter, $is_latest);
+	}
+}

@@ -1,9 +1,57 @@
+parameters:
+    minos.moderation.tables.pending: '%core.table_prefix%minos_pending'
+
 services:
     minos.moderation.settings:
         class: minos\moderation\service\settings
         arguments:
             - '@config'
             - '@config_text'
+
+    minos.moderation.store:
+        class: minos\moderation\service\pending_store
+        arguments:
+            - '@dbal.conn'
+            - '%minos.moderation.tables.pending%'
+
+    minos.moderation.forum:
+        class: minos\moderation\platform\forum
+        arguments:
+            - '@dbal.conn'
+            - '@content.visibility'
+            - '@notification_manager'
+            - '@text_formatter.utils'
+            - '@text_formatter.parser'
+            - '@log'
+            - '@language'
+            - '%tables.posts%'
+            - '%tables.topics%'
+            - '%tables.forums%'
+            - '%tables.users%'
+
+    minos.moderation.transport:
+        class: minos\moderation\service\curl_transport
+
+    minos.moderation.submitter:
+        class: minos\moderation\service\submitter
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@minos.moderation.transport'
+            - '@minos.moderation.applier'
+
+    minos.moderation.listener:
+        class: minos\moderation\event\listener
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@minos.moderation.submitter'
+            - '@auth'
+            - '@language'
+        tags:
+            - { name: event.listener }
 
     minos.moderation.controller.acp:
         class: minos\moderation\controller\acp
