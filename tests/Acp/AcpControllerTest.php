@@ -187,6 +187,19 @@ final class AcpControllerTest extends TestCase
 		self::assertStringContainsString('mode=approve_details', $row['U_MCP']);
 	}
 
+	public function testAMaskedTextLeftToAModeratorIsShownInTheList(): void
+	{
+		$id = $this->board->posting('To jest brzydkie słowo.')['post_id'];
+		$this->board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'ocenzurowane',
+			'ocenzurowany' => 'To jest <███> słowo.'));
+
+		$this->show(new FormRequest());
+
+		$row = $this->template->blocks['minos_rows'][0];
+		self::assertTrue($row['S_MASK_MANUAL']);
+		self::assertSame('To jest &lt;███&gt; słowo.', $row['MASKED'], 'escaped for the page');
+	}
+
 	public function testAFailOpenApprovalIsShownAsSuch(): void
 	{
 		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));

@@ -26,6 +26,9 @@ class forum
 	/** The largest `meta.links` value the gateway keeps. */
 	const MAX_LINKS = 100000;
 
+	/** The gateway's mask character. */
+	const MASK = '█';
+
 	/** What introduces a quote's author in the text sent (content, in Polish). */
 	const QUOTE_AUTHOR_SUFFIX = ' napisał(a):';
 
@@ -166,6 +169,44 @@ class forum
 			return $text;
 		}
 		return rtrim(mb_substr($text, 0, self::MAX_CHARS, 'UTF-8'));
+	}
+
+	/**
+	 * Whether the gateway's masked text can replace the post's text as it is.
+	 *
+	 * Only when (a) it is the text sent with some characters replaced by `█` - the same
+	 * length in characters, every other character unchanged - and (b) the text sent is exactly
+	 * what the author wrote: no BBCode, quote or attribute text was transformed on the way out,
+	 * so publishing the masked text changes nothing but the masked characters. Anything else
+	 * is for a moderator to apply by hand.
+	 *
+	 * @param array<string,mixed> $post   A row from {@see load_post}.
+	 * @param string              $masked The gateway's `ocenzurowany`.
+	 * @return bool
+	 */
+	public function mask_fits(array $post, $masked)
+	{
+		$sent = self::first_chars($this->plain_text((string) $post['post_text']));
+		$raw = str_replace(array("\r\n", "\r"), "\n", (string) $this->text_utils->unparse((string) $post['post_text']));
+		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $raw);
+		if ($sent === '' || $sent !== (is_string($trimmed) ? $trimmed : trim($raw)))
+		{
+			return false;
+		}
+		$sent_chars = preg_split('//u', $sent, -1, PREG_SPLIT_NO_EMPTY);
+		$masked_chars = preg_split('//u', (string) $masked, -1, PREG_SPLIT_NO_EMPTY);
+		if (!is_array($sent_chars) || !is_array($masked_chars) || count($sent_chars) !== count($masked_chars))
+		{
+			return false;
+		}
+		foreach ($masked_chars as $i => $char)
+		{
+			if ($char !== $sent_chars[$i] && $char !== self::MASK)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

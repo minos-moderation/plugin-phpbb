@@ -74,6 +74,8 @@ $lang = array_merge($lang, array(
 	'MINOS_COL_ERROR'            => 'Kod błędu',
 	'MINOS_SUPPORT'              => 'potrzebne wsparcie',
 	'MINOS_TRUNCATED'            => 'oceniono 3000 pierwszych znaków',
+	'MINOS_MASK_MANUAL'          => 'zamaskowany tekst wymaga ręcznego zastosowania',
+	'MINOS_MASKED_TEXT'          => 'Tekst zamaskowany przez bramę',
 	'MINOS_OPEN_IN_MCP'          => 'Otwórz w panelu moderatora',
 
 	'MINOS_STATUS_QUEUED'        => 'Do wysłania',

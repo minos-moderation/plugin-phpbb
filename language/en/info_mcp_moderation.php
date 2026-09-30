@@ -39,6 +39,7 @@ $lang = array_merge($lang, array(
 	'MINOS_MCP_VERDICT_REFUSED'          => 'Minos: błąd konfiguracji',
 	'MINOS_MCP_SUPPORT'                  => 'potrzebne wsparcie',
 	'MINOS_MCP_TRUNCATED'                => 'oceniono 3000 pierwszych znaków',
+	'MINOS_MCP_MASK_MANUAL'              => 'Zamaskowany tekst wymaga ręcznego zastosowania.',
 	'MINOS_MCP_TRUNCATED_EXPLAIN'        => 'Post jest dłuższy niż 3000 znaków, a brama oceniła tylko jego początek. Dlatego nie został opublikowany na podstawie werdyktu: o jego losie zdecydował tryb awarii albo decyduje moderator.',
 	'MINOS_MCP_TITLE'                    => 'Ocena Minos',
 	'MINOS_MCP_CATEGORIES'               => 'Kategorie',

@@ -171,6 +171,9 @@ class acp
 				'ERROR_CODE' => self::escape((string) $row['error_code']),
 				'S_SUPPORT'  => !empty($row['support']),
 				'S_TRUNCATED' => !empty($row['truncated']),
+				'S_MASK_MANUAL' => in_array($row['error_code'], array('mask_manual', 'mask_failed'), true),
+				'MASKED'     => ($row['status'] === pending_store::HELD && $row['masked_text'] !== '')
+					? nl2br(self::escape((string) $row['masked_text'])) : '',
 				'S_HELD'     => $row['status'] === pending_store::HELD,
 				'TIME'       => $this->user->format_date((int) $row['submitted_at']),
 			));

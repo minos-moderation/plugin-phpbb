@@ -120,6 +120,17 @@ final class LateVerdictTest extends TestCase
 		self::assertSame('mask_failed', $this->board->row($id)['error_code']);
 	}
 
+	public function testALateMaskThatDoesNotFitTakesThePostBackToTheQueue(): void
+	{
+		$this->board->configure(array(settings::CENSORED => settings::CENSORED_PUBLISH));
+		$id = $this->published_by_fail_open('To jest brzydkie słowo w teście.');
+
+		$this->late($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ███ słowo w teście.'));
+
+		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame('mask_manual', $this->board->row($id)['error_code']);
+	}
+
 	public function testALateOutcomeThatIsNoVerdictLeavesThePublishedPostAlone(): void
 	{
 		$id = $this->published_by_fail_open();

@@ -79,6 +79,12 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia | tak samo |
    | `nieocenione` | tryb awarii | tryb awarii |
 
+   Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
+   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, a wysłany tekst jest
+   dokładnie tym, co napisał autor (post bez formatowania BBCode, cytatów i atrybutów —
+   inaczej publikacja zmieniłaby więcej niż zamaskowane słowa). W każdym innym wypadku post
+   zostaje w kolejce z notatką „zamaskowany tekst wymaga ręcznego zastosowania”, a
+   zamaskowany tekst widać w panelu moderatora i na liście w ustawieniach rozszerzenia.
    Zamaskowany tekst jest publikowany dopiero po sprawdzeniu, że rzeczywiście zapisał się w
    bazie. Jeśli zapis się nie uda, post zostaje w kolejce — oryginalny tekst nigdy nie
    zostaje opublikowany zamiast zamaskowanego.

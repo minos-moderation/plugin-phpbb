@@ -217,6 +217,7 @@ class listener implements EventSubscriberInterface
 		$post_data['MINOS_CATEGORIES'] = implode(', ', $categories);
 		$post_data['S_MINOS_SUPPORT'] = !empty($pending['support']);
 		$post_data['S_MINOS_TRUNCATED'] = !empty($pending['truncated']);
+		$post_data['S_MINOS_MASK_MANUAL'] = ($pending['error_code'] === 'mask_manual' || $pending['error_code'] === 'mask_failed');
 		$post_data['MINOS_MASKED'] = ($pending['status'] === pending_store::HELD && $pending['masked_text'] !== '')
 			? nl2br(htmlspecialchars((string) $pending['masked_text'], ENT_COMPAT, 'UTF-8'))
 			: '';

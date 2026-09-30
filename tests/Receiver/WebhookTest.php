@@ -250,6 +250,45 @@ final class WebhookTest extends TestCase
 		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_MASKED'));
 	}
 
+	/**
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public function masksThatDoNotFit(): array
+	{
+		$plain = '<t>To jest brzydkie słowo.</t>';
+		return array(
+			'shorter than the text sent' => array($plain, 'To jest ███ słowo.', 'To jest brzydkie słowo.'),
+			'longer than the text sent'  => array($plain, 'To jest ████████ słowo. Dopisane.', 'To jest brzydkie słowo.'),
+			'a changed character that is not the mask' => array($plain, 'To jest ████████ słowa.', 'To jest brzydkie słowo.'),
+			'a post with BBCode' => array('<r>To jest <B><s>[b]</s>brzydkie<e>[/b]</e></B> słowo.</r>', 'To jest ████████ słowo.', 'To jest brzydkie słowo.'),
+			'a post with a quote' => array('<r><QUOTE author="Ala"><s>[quote=Ala]</s>brzydkie<e>[/quote]</e></QUOTE></r>',
+				"Ala napisał(a):\n████████", "Ala napisał(a):\nbrzydkie"),
+		);
+	}
+
+	/**
+	 * @dataProvider masksThatDoNotFit
+	 */
+	public function testAMaskedTextThatDoesNotFitThePostIsLeftToAModerator(string $xml, string $masked, string $sent): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN, settings::CENSORED => settings::CENSORED_PUBLISH));
+		$posted = $this->board->posting('', 'post', array('xml' => $xml));
+		$id = $posted['post_id'];
+		self::assertSame($sent, $this->board->forum->plain_text($xml));
+
+		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked)));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame($xml, $this->board->post($id)['post_text']);
+		$row = $this->board->row($id);
+		self::assertSame(array(pending_store::HELD, 'mask_manual', $masked), array($row['status'], $row['error_code'], $row['masked_text']));
+
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertTrue($details['post_data']['S_MINOS_MASK_MANUAL']);
+		self::assertNotSame('', $details['post_data']['MINOS_MASKED'], 'the masked text is there for the moderator');
+	}
+
 	public function testCensoredWithHoldKeepsThePostQueuedWithTheMaskedTextForTheModerator(): void
 	{
 		$this->board->configure(array(settings::CENSORED => settings::HOLD));

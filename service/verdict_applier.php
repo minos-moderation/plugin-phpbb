@@ -21,6 +21,10 @@ use minos\moderation\platform\forum;
  * no answer in time, a refused request) follows the failure mode and is never read as one.
  * A post a moderator already dealt with is left alone.
  *
+ * A masked text is published only when it is the text sent with characters replaced by
+ * `█`, and the text sent is exactly what the author wrote (see {@see forum::mask_fits});
+ * otherwise the post is held for a moderator, with the masked text beside it.
+ *
  * A post longer than 3000 characters was assessed on its beginning only: a block still
  * blocks, but nothing publishes it on the gateway's word. `bezpieczne` reads as
  * `nieocenione` (the failure mode), and `ocenzurowane` always holds.
@@ -53,6 +57,9 @@ class verdict_applier
 
 	/** The masked text could not be stored (also the error code recorded on the row). */
 	const MASK_FAILED = 'mask_failed';
+
+	/** The masked text does not fit the post as it is: a moderator applies it by hand. */
+	const MASK_MANUAL = 'mask_manual';
 
 	/** @var settings */
 	protected $settings;
@@ -203,6 +210,11 @@ class verdict_applier
 			{
 				$action = self::HOLD;
 				$extra['error_code'] = self::MASK_FAILED;
+			}
+			else if ($action === self::PUBLISH_MASKED && !$this->forum->mask_fits($post, (string) $masked))
+			{
+				$action = self::HOLD;
+				$extra['error_code'] = self::MASK_MANUAL;
 			}
 			switch ($action)
 			{

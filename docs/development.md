@@ -64,8 +64,12 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
-- **A masked text is published only once it is stored**: the update is checked and the text
-  read back; otherwise everything rolls back and the post is held (`mask_failed`).
+- **A masked text is published only if it fits and once it is stored.** It must be the text
+  sent with characters replaced by `█` (same length in characters), and the text sent must
+  equal the post's unparsed text (no BBCode, quote or attribute text transformed), else the
+  post is held (`mask_manual`, the masked text shown to moderators). The update is checked
+  and the text read back; otherwise everything rolls back and the post is held
+  (`mask_failed`).
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an
   unapproved -> deleted change as if the post had been counted, lowering `user_posts` and
   `num_posts`; approve-then-delete inside one transaction keeps the counters right.
