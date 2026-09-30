@@ -126,7 +126,7 @@ final class ListenerTest extends TestCase
 
 	public function testAPostWithNothingToAssessIsNotHeld(): void
 	{
-		$xml = '<r><QUOTE author="Ktoś"><s>[quote="Ktoś"]</s>Tylko cytat.<e>[/quote]</e></QUOTE></r>';
+		$xml = '<r><B><s>[b]</s><e>[/b]</e></B> </r>';
 
 		$posted = $this->board->posting('', 'post', array('xml' => $xml));
 

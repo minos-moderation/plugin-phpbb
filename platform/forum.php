@@ -26,6 +26,9 @@ class forum
 	/** The largest `meta.links` value the gateway keeps. */
 	const MAX_LINKS = 100000;
 
+	/** What introduces a quote's author in the text sent (content, in Polish). */
+	const QUOTE_AUTHOR_SUFFIX = ' napisał(a):';
+
 	/** The most `meta.link_domains` the gateway keeps. */
 	const MAX_LINK_DOMAINS = 10;
 
@@ -112,10 +115,10 @@ class forum
 	/**
 	 * The words of a stored post, as the gateway should read them.
 	 *
-	 * Quotes are removed with their content: they are someone else's words, assessed with
-	 * their own post, and a reply must not be held for what it quotes. The rest loses its
-	 * formatting (BBCode, links, smilies stay as their text), but the text of `title` and
-	 * `alt` attributes is kept, after the text: words can hide there as well as anywhere.
+	 * Quotes are kept, each introduced by its author ("Kasia napisał(a):"): whatever a post
+	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. The rest
+	 * loses its formatting (BBCode, links, smilies stay as their text), but the text of
+	 * `title` and `alt` attributes is kept, after the text: words can hide there as well.
 	 * The text is NOT shortened here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
@@ -128,7 +131,13 @@ class forum
 		{
 			return '';
 		}
-		$xml = (string) $this->text_utils->remove_bbcode($xml, 'quote');
+		$xml = (string) preg_replace_callback('#<QUOTE\b([^>]*)>#', function (array $m) {
+			$author = preg_match('/\sauthor="([^"]*)"/', $m[1], $found)
+				? trim(html_entity_decode($found[1], ENT_QUOTES | ENT_XML1, 'UTF-8')) : '';
+			$line = ($author !== '') ? htmlspecialchars($author . self::QUOTE_AUTHOR_SUFFIX, ENT_NOQUOTES, 'UTF-8') . "\n" : '';
+			return "\n" . $m[0] . $line;
+		}, $xml);
+		$xml = str_replace('</QUOTE>', "</QUOTE>\n", $xml);
 		$text = (string) $this->text_utils->clean_formatting($xml);
 		preg_match_all('/\s(?:title|alt)="([^"]*)"/', $xml, $found);
 		foreach ($found[1] as $attribute)

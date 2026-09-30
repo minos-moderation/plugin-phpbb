@@ -102,7 +102,36 @@ final class SubmitterTest extends TestCase
 		self::assertSame(0, strpos($text, $sent), 'the sent text is the beginning of the post');
 	}
 
-	public function testQuotesAndFormattingStayHomeAndLinksAreCounted(): void
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function quotes(): array
+	{
+		return array(
+			'a reply with a quote' => array(
+				'<r>Zgadzam się.<QUOTE author="Kasia"><s>[quote=Kasia]</s>TRESC<e>[/quote]</e></QUOTE></r>',
+				"Zgadzam się.\nKasia napisał(a):\nTRESC",
+			),
+			'only a quote, no author' => array('<r><QUOTE><s>[quote]</s>OBELGA<e>[/quote]</e></QUOTE></r>', 'OBELGA'),
+			'nested quotes' => array(
+				'<r><QUOTE author="Ala"><s>[quote=Ala]</s><QUOTE author="Ola"><s>[quote=Ola]</s>środek<e>[/quote]</e></QUOTE>zewnątrz<e>[/quote]</e></QUOTE>ja</r>',
+				"Ala napisał(a):\n\nOla napisał(a):\nśrodek\nzewnątrz\nja",
+			),
+		);
+	}
+
+	/**
+	 * @dataProvider quotes
+	 */
+	public function testAQuoteIsSentWithItsAuthorAndAPostOfOnlyAQuoteIsHeld(string $xml, string $sent): void
+	{
+		$posted = $this->board->posting('', 'post', array('xml' => $xml));
+
+		self::assertSame(ITEM_UNAPPROVED, $posted['visibility'], 'wrapping words in a quote does not publish them');
+		self::assertSame($sent, $this->gateway->items(0)[0]['tekst']);
+	}
+
+	public function testFormattingStaysHomeAndLinksAreCounted(): void
 	{
 		$xml = '<r><QUOTE author="Ktoś"><s>[quote="Ktoś"]</s>Cudze słowa w cytacie.<e>[/quote]</e></QUOTE>'
 			. 'Moja odpowiedź z <B><s>[b]</s>pogrubieniem<e>[/b]</e></B> i linkiem '
@@ -112,8 +141,9 @@ final class SubmitterTest extends TestCase
 		$this->board->posting('', 'post', array('xml' => $xml));
 
 		$item = $this->gateway->items(0)[0];
-		self::assertStringNotContainsString('Cudze słowa', $item['tekst']);
+		self::assertStringContainsString("Ktoś napisał(a):\nCudze słowa w cytacie.", $item['tekst']);
 		self::assertStringNotContainsString('[b]', $item['tekst']);
+		self::assertStringNotContainsString('[quote', $item['tekst']);
 		self::assertStringContainsString('pogrubieniem', $item['tekst']);
 		self::assertSame(2, $item['meta']['links']);
 	}

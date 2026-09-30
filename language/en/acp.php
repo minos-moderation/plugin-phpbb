@@ -19,7 +19,7 @@ if (empty($lang) || !is_array($lang))
 }
 
 $lang = array_merge($lang, array(
-	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu (pierwsze 3000 znaków, bez cytatów i formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora — nigdy e-mail, adres IP ani identyfikator użytkownika.',
+	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu (pierwsze 3000 znaków, z cytatami i ich autorami, bez formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora — nigdy e-mail, adres IP ani identyfikator użytkownika.',
 	'MINOS_ACP_SAVED'            => 'Ustawienia zostały zapisane.',
 	'MINOS_ACP_NOT_READY'        => 'Rozszerzenie nie wstrzymuje teraz żadnych postów: włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
 	'MINOS_ACP_READY'            => 'Rozszerzenie działa: nowe posty są oceniane przed publikacją.',

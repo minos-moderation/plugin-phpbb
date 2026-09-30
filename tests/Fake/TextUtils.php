@@ -3,8 +3,9 @@
 namespace minos\moderation\tests\Fake;
 
 /**
- * phpBB's text utilities for the stored XML the tests write: quotes are removed with their
- * content, and formatting markup (`<s>`, `<e>`, tags) disappears.
+ * phpBB's text utilities for the stored XML the tests write: `clean_formatting()` drops the
+ * formatting markup (`<s>`, `<e>`, tags) and keeps the text; `unparse()` gives back what the
+ * author typed, BBCode included.
  */
 class TextUtils implements \phpbb\textformatter\utils_interface
 {
@@ -15,9 +16,9 @@ class TextUtils implements \phpbb\textformatter\utils_interface
 		return html_entity_decode(strip_tags((string) $text), ENT_QUOTES, 'UTF-8');
 	}
 
-	public function remove_bbcode($text, $bbcode_name, $depth = 0)
+	public function unparse($text)
 	{
-		$tag = strtoupper($bbcode_name);
-		return (string) preg_replace('#<' . $tag . '[\s>].*?</' . $tag . '>#s', '', (string) $text);
+		$text = preg_replace('#<br\s*/>#', '', (string) $text);
+		return html_entity_decode(strip_tags((string) $text), ENT_QUOTES, 'UTF-8');
 	}
 }

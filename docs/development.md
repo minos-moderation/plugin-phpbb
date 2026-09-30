@@ -99,7 +99,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | Suite | What it proves |
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers); `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, quotes and markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id. |
@@ -166,7 +166,7 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `mcp_queue::approve_posts()` as the model for the approval and its notifications
   (`notification_manager::add_notifications()` / `delete_notifications()`); the MCP queue
   listing ITEM_UNAPPROVED and ITEM_REAPPROVE posts;
-- `textformatter\utils_interface::remove_bbcode()`, `clean_formatting()`;
+- `textformatter\utils_interface::clean_formatting()`, `unparse()`;
   `parser_interface::parse()`, `disable_bbcodes()`, `disable_smilies()`,
   `disable_magic_url()` and their `enable_*`; `message_parser` feeding the parser raw text;
 - `log_interface::add()` with the `mod` and `critical` modes; `language::lang()` returning a

@@ -9,5 +9,5 @@ interface utils_interface
 {
 	public function clean_formatting($text);
 
-	public function remove_bbcode($text, $bbcode_name, $depth = 0);
+	public function unparse($text);
 }

@@ -122,9 +122,10 @@ Do bramy trafia wyłącznie:
 
 - identyfikator `phpbb:<numer postu>` (po poprawce posta czekającego na werdykt:
   `phpbb:<numer>.<wersja>`) — bez treści;
-- tekst postu: **pierwsze 3000 znaków**, bez cytatów (to cudze słowa, oceniane przy
-  własnym poście) i bez formatowania BBCode/HTML, ale z tekstem atrybutów `title` i `alt`
-  (tam też można ukryć słowa);
+- tekst postu: **pierwsze 3000 znaków**, razem z cytatami — każdy poprzedzony wierszem
+  „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
+  `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
+  `title` i `alt` (tam też można ukryć słowa);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
@@ -140,7 +141,8 @@ przekierowaniem.
   pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
   wysyłany, bo werdykt niczego by nie zmienił;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- postów bez tekstu do oceny (np. sam cytat);
+- postów bez żadnego tekstu do oceny (sam cytat jest zwykłym postem: zostaje wstrzymany i
+  oceniony);
 - postów w forach spoza listy ustawień;
 - wszystkich postów, gdy ocenianie jest wyłączone albo brakuje klucza, sekretu lub adresu.
 
