@@ -54,15 +54,21 @@ class sweeper extends \phpbb\cron\task\base
 	/** @var verdict_applier */
 	protected $applier;
 
+	/** @var \minos\moderation\platform\forum */
+	protected $forum;
+
 	/**
 	 * @param \phpbb\config\config $config    phpBB's configuration (the last run).
 	 * @param settings             $settings  The administrator's settings.
 	 * @param pending_store        $store     The pending rows.
 	 * @param submitter            $submitter Sends posts to the gateway.
 	 * @param verdict_applier      $applier   Applies outcomes.
+	 * @param \minos\moderation\platform\forum $forum The error log for a row that fails.
 	 */
-	public function __construct(\phpbb\config\config $config, settings $settings, pending_store $store, submitter $submitter, verdict_applier $applier)
+	public function __construct(\phpbb\config\config $config, settings $settings, pending_store $store, submitter $submitter,
+		verdict_applier $applier, \minos\moderation\platform\forum $forum)
 	{
+		$this->forum = $forum;
 		$this->config = $config;
 		$this->settings = $settings;
 		$this->store = $store;
@@ -116,14 +122,29 @@ class sweeper extends \phpbb\cron\task\base
 			return $done;
 		}
 
+		// Row by row: one that fails is logged (step and post id only) and the others go on.
 		foreach ($this->store->received(self::BATCH) as $row)
 		{
-			$done['applied'] += ($this->applier->apply((int) $row['post_id'], $now) !== null) ? 1 : 0;
+			try
+			{
+				$done['applied'] += ($this->applier->apply((int) $row['post_id'], $now) !== null) ? 1 : 0;
+			}
+			catch (\Throwable $e)
+			{
+				$this->forum->log_failure('apply', (int) $row['post_id']);
+			}
 		}
 
 		foreach ($this->store->overdue($now - $this->settings->timeout_seconds(), self::BATCH) as $row)
 		{
-			$done['timed_out'] += ($this->applier->fail($row, pending_store::VERDICT_TIMEOUT, '', $now) !== null) ? 1 : 0;
+			try
+			{
+				$done['timed_out'] += ($this->applier->fail($row, pending_store::VERDICT_TIMEOUT, '', $now) !== null) ? 1 : 0;
+			}
+			catch (\Throwable $e)
+			{
+				$this->forum->log_failure('timeout', (int) $row['post_id']);
+			}
 		}
 
 		if ($this->settings->is_ready())

@@ -28,15 +28,20 @@ class deferred_verdicts
 	/** @var verdict_applier */
 	protected $applier;
 
+	/** @var \minos\moderation\platform\forum */
+	protected $forum;
+
 	/** @var array<int,int> Posts whose recorded outcome waits for this request's end. */
 	protected $post_ids = array();
 
 	/**
-	 * @param verdict_applier $applier Applies one recorded outcome.
+	 * @param verdict_applier                    $applier Applies one recorded outcome.
+	 * @param \minos\moderation\platform\forum $forum   The error log for a row that fails.
 	 */
-	public function __construct(verdict_applier $applier)
+	public function __construct(verdict_applier $applier, \minos\moderation\platform\forum $forum)
 	{
 		$this->applier = $applier;
+		$this->forum = $forum;
 	}
 
 	/**
@@ -68,6 +73,7 @@ class deferred_verdicts
 			catch (\Throwable $e)
 			{
 				// The transaction was rolled back; the row stays `received` for the cron task.
+				$this->forum->log_failure('apply', $post_id);
 			}
 		}
 	}

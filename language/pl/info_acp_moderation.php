@@ -24,6 +24,7 @@ $lang = array_merge($lang, array(
 	'ACP_MINOS_SETTINGS' => 'Ustawienia moderacji',
 
 	'LOG_MINOS_SETTINGS_UPDATED' => '<strong>Zmieniono ustawienia rozszerzenia Minos</strong>',
+	'LOG_MINOS_ROW_FAILED'       => '<strong>Minos: nie udało się obsłużyć postu</strong><br />» krok %1$s, post %2$s; ponowna próba w kolejnym przebiegu zadania cron',
 	'LOG_MINOS_GATEWAY_REFUSED'  => '<strong>Minos: brama odrzuciła żądanie</strong><br />» HTTP %1$s, kod %2$s',
 	'LOG_MINOS_POST_PUBLISHED'   => '<strong>Minos opublikował post</strong><br />» %s',
 	'LOG_MINOS_POST_PUBLISHED_FAIL_OPEN' => '<strong>Minos opublikował post bez oceny (tryb awarii fail-open)</strong><br />» %s',

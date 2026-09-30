@@ -489,6 +489,19 @@ class forum
 	}
 
 	/**
+	 * Writes into the error log that one post could not be handled: the step and the post id
+	 * only, never an exception's message (it may carry SQL with the post's text).
+	 *
+	 * @param string $step    `submit`, `timeout` or `apply`.
+	 * @param int    $post_id The post.
+	 * @return void
+	 */
+	public function log_failure($step, $post_id)
+	{
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_ROW_FAILED', false, array((string) $step, (int) $post_id));
+	}
+
+	/**
 	 * Changes one post's visibility with the first/last-post flags the MCP would compute.
 	 *
 	 * @param int                 $visibility ITEM_APPROVED, ITEM_DELETED or ITEM_REAPPROVE.

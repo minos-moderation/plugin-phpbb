@@ -139,7 +139,7 @@ class Board
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
 		$board->receiver = new receiver($board->settings, $board->store);
-		$board->deferred = new deferred_verdicts($board->applier);
+		$board->deferred = new deferred_verdicts($board->applier, $board->forum);
 		$board->dispatcher = new RecordingDispatcher();
 		$board->auth = new \phpbb\auth\auth();
 		$board->auth->global['f_noapprove'] = true;
@@ -290,7 +290,7 @@ class Board
 	 */
 	public function sweeper()
 	{
-		$sweeper = new sweeper($this->config, $this->settings, $this->store, $this->submitter, $this->applier);
+		$sweeper = new sweeper($this->config, $this->settings, $this->store, $this->submitter, $this->applier, $this->forum);
 		$sweeper->set_name('cron.task.minos.moderation.sweeper');
 		return $sweeper;
 	}
@@ -450,7 +450,7 @@ class Board
 		$this->applier = new verdict_applier($this->settings, $this->store, $this->forum, $this->db);
 		$this->submitter = new submitter($this->settings, $this->store, $this->forum, $this->transport, $this->applier);
 		$this->receiver = new receiver($this->settings, $this->store);
-		$this->deferred = new deferred_verdicts($this->applier);
+		$this->deferred = new deferred_verdicts($this->applier, $this->forum);
 		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language);
 	}
 }

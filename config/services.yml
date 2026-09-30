@@ -59,6 +59,7 @@ services:
         class: minos\moderation\event\deferred_verdicts
         arguments:
             - '@minos.moderation.applier'
+            - '@minos.moderation.forum'
 
     minos.moderation.listener:
         class: minos\moderation\event\listener
@@ -102,6 +103,7 @@ services:
             - '@minos.moderation.store'
             - '@minos.moderation.submitter'
             - '@minos.moderation.applier'
+            - '@minos.moderation.forum'
         calls:
             - [set_name, [cron.task.minos.moderation.sweeper]]
         tags:

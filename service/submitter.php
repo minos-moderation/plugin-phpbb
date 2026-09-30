@@ -129,29 +129,14 @@ class submitter
 			{
 				continue;
 			}
-			$post = $this->forum->load_post((int) $row['post_id']);
-			if ($post === null || !$this->forum->awaits_approval($post))
+			$entry = $this->guarded((int) $row['post_id'], function () use ($row, $now) {
+				return $this->prepare($row, $now);
+			});
+			if ($entry === null)
 			{
-				$this->store->supersede((int) $row['post_id'], (int) $row['revision'], $now);
 				continue;
 			}
-			$text = forum::first_chars($this->forum->plain_text((string) $post['post_text']));
-			if ($text === '')
-			{
-				// Edited down to nothing assessable while it waited.
-				$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
-				continue;
-			}
-			$batch[] = array(
-				'row'  => $row,
-				'md5'  => md5($text),
-				'item' => array(
-					'id'     => self::item_id((int) $row['post_id'], (int) $row['revision']),
-					'tekst'  => $text,
-					'profil' => $this->settings->profile(),
-					'meta'   => $this->forum->meta($post),
-				),
-			);
+			$batch[] = $entry;
 			if (count($batch) === self::MAX_ITEMS)
 			{
 				$this->send($batch, $now);
@@ -161,6 +146,61 @@ class submitter
 		if ($batch)
 		{
 			$this->send($batch, $now);
+		}
+	}
+
+	/**
+	 * The item of one queued row, or null when there is nothing to send for it.
+	 *
+	 * @param array<string,mixed> $row A queued row.
+	 * @param int                 $now Unix seconds.
+	 * @return array{row:array<string,mixed>,md5:string,item:array<string,mixed>}|null
+	 */
+	protected function prepare(array $row, $now)
+	{
+		$post = $this->forum->load_post((int) $row['post_id']);
+		if ($post === null || !$this->forum->awaits_approval($post))
+		{
+			$this->store->supersede((int) $row['post_id'], (int) $row['revision'], $now);
+			return null;
+		}
+		$text = forum::first_chars($this->forum->plain_text((string) $post['post_text']));
+		if ($text === '')
+		{
+			// Edited down to nothing assessable while it waited.
+			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
+			return null;
+		}
+		return array(
+			'row'  => $row,
+			'md5'  => md5($text),
+			'item' => array(
+				'id'     => self::item_id((int) $row['post_id'], (int) $row['revision']),
+				'tekst'  => $text,
+				'profil' => $this->settings->profile(),
+				'meta'   => $this->forum->meta($post),
+			),
+		);
+	}
+
+	/**
+	 * Runs one row's step; a failure is logged (step and post id, never the message) and the
+	 * other rows go on.
+	 *
+	 * @param int      $post_id The post.
+	 * @param callable $work    The step.
+	 * @return mixed The step's result, or null when it failed.
+	 */
+	protected function guarded($post_id, callable $work)
+	{
+		try
+		{
+			return $work();
+		}
+		catch (\Throwable $e)
+		{
+			$this->forum->log_failure('submit', (int) $post_id);
+			return null;
 		}
 	}
 
@@ -201,7 +241,9 @@ class submitter
 			{
 				foreach ($batch as $entry)
 				{
-					$this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $entry['md5']);
+					$this->guarded((int) $entry['row']['post_id'], function () use ($entry) {
+						return $this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $entry['md5']);
+					});
 				}
 				return;
 			}
@@ -224,14 +266,19 @@ class submitter
 		if ($element !== null && isset($batch[$element]) && count($batch) > 1)
 		{
 			// One item spoiled the batch: that item fails, the others go again without it.
-			$this->applier->fail($batch[$element]['row'], pending_store::VERDICT_REFUSED, $code, $now);
+			$spoiled = $batch[$element]['row'];
+			$this->guarded((int) $spoiled['post_id'], function () use ($spoiled, $code, $now) {
+				return $this->applier->fail($spoiled, pending_store::VERDICT_REFUSED, $code, $now);
+			});
 			unset($batch[$element]);
 			$this->send(array_values($batch), $now);
 			return;
 		}
 		foreach ($batch as $entry)
 		{
-			$this->applier->fail($entry['row'], pending_store::VERDICT_REFUSED, $code, $now);
+			$this->guarded((int) $entry['row']['post_id'], function () use ($entry, $code, $now) {
+				return $this->applier->fail($entry['row'], pending_store::VERDICT_REFUSED, $code, $now);
+			});
 		}
 	}
 
@@ -280,7 +327,9 @@ class submitter
 			{
 				$pause = min(self::MAX_BACKOFF_S, self::FIRST_BACKOFF_S * (2 ** min(10, (int) $row['attempts'])));
 			}
-			$this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code, $entry['md5']);
+			$this->guarded((int) $row['post_id'], function () use ($row, $now, $pause, $code, $entry) {
+				return $this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code, $entry['md5']);
+			});
 		}
 	}
 }
