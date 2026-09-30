@@ -1,0 +1,135 @@
+<!-- INCLUDE overall_header.html -->
+
+<h1>{L_ACP_MINOS_TITLE}</h1>
+
+<p>{L_MINOS_ACP_EXPLAIN}</p>
+
+<!-- IF S_MINOS_ERROR -->
+<div class="errorbox">
+	<p>{ERROR_MSG}</p>
+</div>
+<!-- ENDIF -->
+
+<!-- IF S_MINOS_SAVED -->
+<div class="successbox">
+	<p>{L_MINOS_ACP_SAVED}</p>
+</div>
+<!-- ENDIF -->
+
+<!-- IF S_MINOS_READY -->
+<div class="successbox"><p>{L_MINOS_ACP_READY}</p></div>
+<!-- ELSE -->
+<div class="errorbox"><p>{L_MINOS_ACP_NOT_READY}</p></div>
+<!-- ENDIF -->
+
+<!-- IF S_MINOS_LAST_ERROR -->
+<fieldset>
+	<legend>{L_MINOS_LAST_ERROR}</legend>
+	<p>{L_MINOS_LAST_ERROR_EXPLAIN}</p>
+	<p><strong>{MINOS_LAST_ERROR}</strong> ({MINOS_LAST_ERROR_TIME}): {MINOS_LAST_ERROR_HELP}</p>
+</fieldset>
+<!-- ENDIF -->
+
+<fieldset>
+	<legend>{L_MINOS_WEBHOOK}</legend>
+	<p>{L_MINOS_WEBHOOK_EXPLAIN}</p>
+	<p><input type="text" class="text" readonly="readonly" size="70" value="{MINOS_WEBHOOK_URL}" onclick="this.select();" /></p>
+</fieldset>
+
+<form id="minos_moderation" method="post" action="{U_ACTION}" autocomplete="off">
+
+<fieldset>
+	<legend>{L_MINOS_SETTINGS}</legend>
+	<dl>
+		<dt><label for="minos_enabled">{L_MINOS_ENABLED}{L_COLON}</label><br /><span>{L_MINOS_ENABLED_EXPLAIN}</span></dt>
+		<dd>
+			<label><input type="radio" class="radio" id="minos_enabled" name="minos_enabled" value="1"<!-- IF S_MINOS_ENABLED --> checked="checked"<!-- ENDIF --> /> {L_YES}</label>
+			<label><input type="radio" class="radio" name="minos_enabled" value="0"<!-- IF not S_MINOS_ENABLED --> checked="checked"<!-- ENDIF --> /> {L_NO}</label>
+		</dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_gateway_url">{L_MINOS_GATEWAY_URL}{L_COLON}</label><br /><span>{L_MINOS_GATEWAY_URL_EXPLAIN}</span></dt>
+		<dd><input type="url" class="text" id="minos_gateway_url" name="minos_gateway_url" size="50" maxlength="255" value="{MINOS_GATEWAY_URL}" /></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_api_key">{L_MINOS_API_KEY}{L_COLON}</label><br /><span>{L_MINOS_API_KEY_EXPLAIN}</span></dt>
+		<dd>
+			<input type="password" class="text" id="minos_api_key" name="minos_api_key" size="50" maxlength="255" value="" autocomplete="new-password" />
+			<br /><span><!-- IF MINOS_KEY_HINT -->{L_MINOS_STORED}{L_COLON} <code>{MINOS_KEY_HINT}</code><!-- ELSE -->{L_MINOS_NOT_STORED}<!-- ENDIF --></span>
+		</dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_webhook_secret">{L_MINOS_WEBHOOK_SECRET}{L_COLON}</label><br /><span>{L_MINOS_WEBHOOK_SECRET_EXPLAIN}</span></dt>
+		<dd>
+			<input type="password" class="text" id="minos_webhook_secret" name="minos_webhook_secret" size="50" maxlength="255" value="" autocomplete="new-password" />
+			<br /><span><!-- IF MINOS_SECRET_HINT -->{L_MINOS_STORED}{L_COLON} <code>{MINOS_SECRET_HINT}</code><!-- ELSE -->{L_MINOS_NOT_STORED}<!-- ENDIF --></span>
+		</dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_profile">{L_MINOS_PROFILE}{L_COLON}</label><br /><span>{L_MINOS_PROFILE_EXPLAIN}</span></dt>
+		<dd><select id="minos_profile" name="minos_profile"><!-- BEGIN minos_profiles --><option value="{minos_profiles.VALUE}"<!-- IF minos_profiles.S_SELECTED --> selected="selected"<!-- ENDIF -->>{minos_profiles.LABEL}</option><!-- END minos_profiles --></select></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_fail_mode">{L_MINOS_FAIL_MODE}{L_COLON}</label><br /><span>{L_MINOS_FAIL_MODE_EXPLAIN}</span></dt>
+		<dd><select id="minos_fail_mode" name="minos_fail_mode"><!-- BEGIN minos_fail_modes --><option value="{minos_fail_modes.VALUE}"<!-- IF minos_fail_modes.S_SELECTED --> selected="selected"<!-- ENDIF -->>{minos_fail_modes.LABEL}</option><!-- END minos_fail_modes --></select></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_timeout_min">{L_MINOS_TIMEOUT}{L_COLON}</label><br /><span>{L_MINOS_TIMEOUT_EXPLAIN}</span></dt>
+		<dd><input type="number" id="minos_timeout_min" name="minos_timeout_min" min="{MINOS_TIMEOUT_MIN_MIN}" max="{MINOS_TIMEOUT_MIN_MAX}" value="{MINOS_TIMEOUT_MIN}" /></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_censored">{L_MINOS_CENSORED}{L_COLON}</label><br /><span>{L_MINOS_CENSORED_EXPLAIN}</span></dt>
+		<dd><select id="minos_censored" name="minos_censored"><!-- BEGIN minos_censored --><option value="{minos_censored.VALUE}"<!-- IF minos_censored.S_SELECTED --> selected="selected"<!-- ENDIF -->>{minos_censored.LABEL}</option><!-- END minos_censored --></select></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_blocked">{L_MINOS_BLOCKED}{L_COLON}</label><br /><span>{L_MINOS_BLOCKED_EXPLAIN}</span></dt>
+		<dd><select id="minos_blocked" name="minos_blocked"><!-- BEGIN minos_blocked --><option value="{minos_blocked.VALUE}"<!-- IF minos_blocked.S_SELECTED --> selected="selected"<!-- ENDIF -->>{minos_blocked.LABEL}</option><!-- END minos_blocked --></select></dd>
+	</dl>
+	<dl>
+		<dt><label for="minos_forums">{L_MINOS_FORUMS}{L_COLON}</label><br /><span>{L_MINOS_FORUMS_EXPLAIN}</span></dt>
+		<dd>
+			<select id="minos_forums" name="minos_forums[]" multiple="multiple" size="8">{S_FORUM_OPTIONS}</select>
+			<!-- IF S_MINOS_ALL_FORUMS --><br /><span>{L_MINOS_ALL_FORUMS}</span><!-- ENDIF -->
+		</dd>
+	</dl>
+</fieldset>
+
+<fieldset class="submit-buttons">
+	<input class="button1" type="submit" id="submit" name="submit" value="{L_SUBMIT}" />&nbsp;
+	<input class="button2" type="reset" id="reset" name="reset" value="{L_RESET}" />
+	{S_FORM_TOKEN}
+</fieldset>
+
+</form>
+
+<h2>{L_MINOS_RECENT}</h2>
+<p>{MINOS_RECENT_EXPLAIN}</p>
+
+<table class="table1 zebra-table">
+	<thead>
+	<tr>
+		<th>{L_MINOS_COL_POST}</th>
+		<th>{L_MINOS_COL_TIME}</th>
+		<th>{L_MINOS_COL_STATUS}</th>
+		<th>{L_MINOS_COL_VERDICT}</th>
+		<th>{L_MINOS_COL_CATEGORIES}</th>
+		<th>{L_MINOS_COL_ERROR}</th>
+	</tr>
+	</thead>
+	<tbody>
+	<!-- BEGIN minos_rows -->
+	<tr>
+		<td><a href="{minos_rows.U_POST}">#{minos_rows.POST_ID}</a><!-- IF minos_rows.S_HELD --> · <a href="{minos_rows.U_MCP}">{L_MINOS_OPEN_IN_MCP}</a><!-- ENDIF --></td>
+		<td>{minos_rows.TIME}</td>
+		<td>{minos_rows.STATUS}<!-- IF minos_rows.S_SUPPORT --> · <strong>{L_MINOS_SUPPORT}</strong><!-- ENDIF --></td>
+		<td>{minos_rows.VERDICT}</td>
+		<td>{minos_rows.CATEGORIES}</td>
+		<td>{minos_rows.ERROR_CODE}</td>
+	</tr>
+	<!-- BEGINELSE -->
+	<tr><td colspan="6">{L_MINOS_RECENT_EMPTY}</td></tr>
+	<!-- END minos_rows -->
+	</tbody>
+</table>
+
+<!-- INCLUDE overall_footer.html -->

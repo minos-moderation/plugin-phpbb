@@ -1,0 +1,20 @@
+services:
+    minos.moderation.settings:
+        class: minos\moderation\service\settings
+        arguments:
+            - '@config'
+            - '@config_text'
+
+    minos.moderation.controller.acp:
+        class: minos\moderation\controller\acp
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@request'
+            - '@template'
+            - '@language'
+            - '@log'
+            - '@user'
+            - '@controller.helper'
+            - '%core.root_path%'
+            - '%core.php_ext%'
