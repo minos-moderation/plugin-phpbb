@@ -36,5 +36,7 @@ jobs:
         if: matrix.php == '8.3'
         run: |
           bash bin/build-zip.sh
-          unzip -l build/minos-moderation-*.zip | grep -q ' minos/moderation/ext.php$'
-          unzip -l build/minos-moderation-*.zip | grep -q ' minos/moderation/vendor/minos-moderation/client-php/src/Signature.php$'
+          unzip -l build/minos-moderation-*.zip > build/contents.txt
+          grep -q ' minos/moderation/ext.php$' build/contents.txt
+          grep -q ' minos/moderation/vendor/minos-moderation/client-php/src/Signature.php$' build/contents.txt
+          ! grep -Eq 'composer\.lock|/tests/|mock-gateway|vendor/.*composer\.json' build/contents.txt
