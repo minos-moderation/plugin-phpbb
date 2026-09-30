@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         colors="true"
+         convertDeprecationsToExceptions="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         beStrictAboutOutputDuringTests="true">
+    <testsuites>
+        <testsuite name="extension">
+            <directory>tests/Receiver</directory>
+            <directory>tests/Submission</directory>
+            <directory>tests/Posting</directory>
+            <directory>tests/Cron</directory>
+            <directory>tests/Acp</directory>
+            <directory>tests/Extension</directory>
+        </testsuite>
+        <testsuite name="end-to-end">
+            <directory>tests/EndToEnd</directory>
+        </testsuite>
+        <testsuite name="repo">
+            <directory>tests/Repo</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
