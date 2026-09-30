@@ -143,8 +143,12 @@ Do bramy trafia wyłącznie:
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
 
-**Nigdy** nie jest wysyłany e-mail, adres IP, identyfikator ani nazwa użytkownika. Klucz API
-jest wysyłany tylko w nagłówku `X-Gateway-Key`, tylko przez `https://` i nigdy za
+**Nigdy** nie są wysyłane dane konta autora: jego adres e-mail, adres IP, identyfikator ani
+login. Jedyne imiona i nazwy, które opuszczają forum, to te, które autor sam wpisał w treść
+postu — przede wszystkim autorzy cytatów (`[quote="Kasia"]` trafia do bramy jako „Kasia
+napisał(a):”) — bo brama ocenia je jako część tekstu, tak jak każde inne słowo postu.
+
+Klucz API jest wysyłany tylko w nagłówku `X-Gateway-Key`, tylko przez `https://` i nigdy za
 przekierowaniem.
 
 ## Których postów rozszerzenie nie wstrzymuje

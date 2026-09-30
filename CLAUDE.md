@@ -16,8 +16,9 @@ its backlog item is `minos-moderation/minos#4`. Layout, tests and the verified p
 - A PHP plugin bundles `minos-moderation/client-php` at a pinned version and never forks
   its verification. Another language implements it and tests it on the gateway's signature
   vector, copied byte for byte.
-- Only the post's plain text (first 3000 characters), `links`, `link_domains` and
-  `author_first_post` leave the forum; never an e-mail, an IP address or a user id.
+- Only the post's plain text (first 3000 characters, quote attributions included),
+  `links`, `link_domains` and `author_first_post` leave the forum; never the account's
+  e-mail, IP address, id or login.
 - Switched off, it does nothing (webhook 404, no sending, cron idle). Fail-closed is the
   default; a text is published only if the gateway saw it whole and it is really stored.
 
