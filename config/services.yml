@@ -32,6 +32,14 @@ services:
     minos.moderation.transport:
         class: minos\moderation\service\curl_transport
 
+    minos.moderation.applier:
+        class: minos\moderation\service\verdict_applier
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@dbal.conn'
+
     minos.moderation.submitter:
         class: minos\moderation\service\submitter
         arguments:
@@ -39,6 +47,17 @@ services:
             - '@minos.moderation.store'
             - '@minos.moderation.forum'
             - '@minos.moderation.transport'
+            - '@minos.moderation.applier'
+
+    minos.moderation.receiver:
+        class: minos\moderation\service\receiver
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+
+    minos.moderation.deferred_verdicts:
+        class: minos\moderation\event\deferred_verdicts
+        arguments:
             - '@minos.moderation.applier'
 
     minos.moderation.listener:
@@ -52,6 +71,14 @@ services:
             - '@language'
         tags:
             - { name: event.listener }
+
+    minos.moderation.controller.webhook:
+        class: minos\moderation\controller\webhook
+        arguments:
+            - '@symfony_request'
+            - '@minos.moderation.receiver'
+            - '@minos.moderation.deferred_verdicts'
+            - '@dispatcher'
 
     minos.moderation.controller.acp:
         class: minos\moderation\controller\acp
