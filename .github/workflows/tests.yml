@@ -1,0 +1,42 @@
+name: Tests
+
+# Branch pushes are covered by their pull request; `main` is tested after the merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 7.4: the oldest PHP the extension promises to run on (customers' hosts);
+        # 8.3: a current one.
+        php: ['7.4', '8.3']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, json, mbstring, pdo_sqlite, zip
+          coverage: none
+      - run: composer validate --no-check-publish
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - name: php -l over the extension and its tests
+        run: find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l > /dev/null
+      - run: vendor/bin/phpunit
+      - name: The installable package
+        if: matrix.php == '8.3'
+        run: |
+          bash bin/build-zip.sh
+          unzip -l build/minos-moderation-*.zip > build/contents.txt
+          grep -q ' minos/moderation/ext.php$' build/contents.txt
+          grep -q ' minos/moderation/vendor/minos-moderation/client-php/src/Signature.php$' build/contents.txt
+          ! grep -Eq 'composer\.lock|/tests/|mock-gateway|vendor/.*composer\.json' build/contents.txt

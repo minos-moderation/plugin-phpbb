@@ -1,0 +1,9 @@
+{% if S_MINOS %}
+<div class="post-notice">
+	<p><strong>{{ lang('MINOS_MCP_TITLE') }}{{ lang('COLON') }}</strong> {{ MINOS_STATUS }}{% if MINOS_CATEGORIES %} · {{ lang('MINOS_MCP_CATEGORIES') }}{{ lang('COLON') }} {{ MINOS_CATEGORIES }}{% endif %}</p>
+	{% if S_MINOS_TRUNCATED %}<p>{{ lang('MINOS_MCP_TRUNCATED_EXPLAIN') }}</p>{% endif %}
+	{% if S_MINOS_SUPPORT %}<p><strong>{{ lang('MINOS_MCP_SUPPORT') }}</strong>: {{ lang('MINOS_MCP_SUPPORT_EXPLAIN') }}</p>{% endif %}
+	{% if S_MINOS_MASK_MANUAL %}<p><strong>{{ lang('MINOS_MCP_MASK_MANUAL') }}</strong></p>{% endif %}
+	{% if MINOS_MASKED %}<p>{{ lang('MINOS_MCP_MASKED') }}{{ lang('COLON') }}</p><blockquote><div>{{ MINOS_MASKED }}</div></blockquote>{% endif %}
+</div>
+{% endif %}

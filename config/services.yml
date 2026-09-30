@@ -1,0 +1,110 @@
+parameters:
+    minos.moderation.tables.pending: '%core.table_prefix%minos_pending'
+
+services:
+    minos.moderation.settings:
+        class: minos\moderation\service\settings
+        arguments:
+            - '@config'
+            - '@config_text'
+
+    minos.moderation.store:
+        class: minos\moderation\service\pending_store
+        arguments:
+            - '@dbal.conn'
+            - '%minos.moderation.tables.pending%'
+
+    minos.moderation.forum:
+        class: minos\moderation\platform\forum
+        arguments:
+            - '@dbal.conn'
+            - '@content.visibility'
+            - '@notification_manager'
+            - '@text_formatter.utils'
+            - '@text_formatter.parser'
+            - '@log'
+            - '@language'
+            - '%tables.posts%'
+            - '%tables.topics%'
+            - '%tables.forums%'
+            - '%tables.users%'
+
+    minos.moderation.transport:
+        class: minos\moderation\service\curl_transport
+
+    minos.moderation.applier:
+        class: minos\moderation\service\verdict_applier
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@dbal.conn'
+
+    minos.moderation.submitter:
+        class: minos\moderation\service\submitter
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@minos.moderation.transport'
+            - '@minos.moderation.applier'
+
+    minos.moderation.receiver:
+        class: minos\moderation\service\receiver
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+
+    minos.moderation.deferred_verdicts:
+        class: minos\moderation\event\deferred_verdicts
+        arguments:
+            - '@minos.moderation.applier'
+            - '@minos.moderation.forum'
+
+    minos.moderation.listener:
+        class: minos\moderation\event\listener
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.forum'
+            - '@minos.moderation.submitter'
+            - '@auth'
+            - '@language'
+        tags:
+            - { name: event.listener }
+
+    minos.moderation.controller.webhook:
+        class: minos\moderation\controller\webhook
+        arguments:
+            - '@symfony_request'
+            - '@minos.moderation.receiver'
+            - '@minos.moderation.deferred_verdicts'
+            - '@dispatcher'
+
+    minos.moderation.controller.acp:
+        class: minos\moderation\controller\acp
+        arguments:
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@request'
+            - '@template'
+            - '@language'
+            - '@log'
+            - '@user'
+            - '@controller.helper'
+            - '%core.root_path%'
+            - '%core.php_ext%'
+
+    minos.moderation.cron.sweeper:
+        class: minos\moderation\cron\sweeper
+        arguments:
+            - '@config'
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.submitter'
+            - '@minos.moderation.applier'
+            - '@minos.moderation.forum'
+        calls:
+            - [set_name, [cron.task.minos.moderation.sweeper]]
+        tags:
+            - { name: cron.task }

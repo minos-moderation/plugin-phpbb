@@ -1,0 +1,4 @@
+minos_moderation_webhook:
+    path: /minos/webhook
+    defaults: { _controller: minos.moderation.controller.webhook:handle }
+    methods: [POST]
