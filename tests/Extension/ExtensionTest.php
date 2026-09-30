@@ -74,7 +74,7 @@ final class ExtensionTest extends TestCase
 		self::assertFalse($settings->is_ready());
 		self::assertSame('https://gateway.wergiliusz.app', $settings->gateway_url());
 		self::assertSame('forum_adult', $settings->profile());
-		self::assertSame(settings::FAIL_OPEN, $settings->fail_mode());
+		self::assertSame(settings::FAIL_CLOSED, $settings->fail_mode(), 'an unassessed post waits for a human');
 		self::assertSame(20 * 60, $settings->timeout_seconds());
 		self::assertSame(settings::CENSORED_PUBLISH, $settings->censored_mode());
 		self::assertSame(settings::HOLD, $settings->blocked_mode());

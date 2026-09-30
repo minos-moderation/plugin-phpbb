@@ -82,7 +82,8 @@ final class SweeperTest extends TestCase
 		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
 
 		self::assertSame(pending_store::VERDICT_TIMEOUT, $this->board->row($id)['verdict']);
-		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status'], 'the default fail-closed');
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
 	}
 
 	public function testADueRetryIsSentAgain(): void

@@ -109,7 +109,8 @@ final class MockGatewayTest extends TestCase
 		self::assertStringNotContainsString('słowem', $board->post($posts['masked'])['post_text']);
 
 		self::assertSame('nieocenione', $board->row($posts['unassessed'])['verdict']);
-		self::assertSame(ITEM_APPROVED, (int) $board->post($posts['unassessed'])['post_visibility'], 'the default fail-open');
+		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($posts['unassessed'])['post_visibility'], 'the default fail-closed');
+		self::assertSame(pending_store::HELD, $board->row($posts['unassessed'])['status']);
 
 		self::assertSame(pending_store::PUBLISHED, $board->row($posts['twice'])['status']);
 

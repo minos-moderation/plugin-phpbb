@@ -32,8 +32,8 @@ class settings
 	/** Failure mode: an unassessed post stays in the approval queue. */
 	const FAIL_CLOSED = 'fail-closed';
 
-	/** The failure mode of a new installation (see README: a forum keeps working as it did). */
-	const DEFAULT_FAIL_MODE = self::FAIL_OPEN;
+	/** The failure mode of a new installation: an unassessed post waits for a human. */
+	const DEFAULT_FAIL_MODE = self::FAIL_CLOSED;
 
 	/** `ocenzurowane`: publish the masked text. */
 	const CENSORED_PUBLISH = 'publish';
