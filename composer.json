@@ -1,0 +1,50 @@
+{
+    "name": "minos/moderation",
+    "type": "phpbb-extension",
+    "description": "Sends new phpBB posts to the Wergiliusz gateway (Minos) and applies the verdict delivered to a signed webhook.",
+    "homepage": "https://github.com/minos-moderation/plugin-phpbb",
+    "version": "0.1.0-dev",
+    "license": "GPL-2.0-only",
+    "authors": [
+        {
+            "name": "Minos",
+            "homepage": "https://github.com/minos-moderation"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "minos-moderation/client-php": "dev-main"
+    },
+    "require-dev": {
+        "ext-pdo_sqlite": "*",
+        "phpunit/phpunit": "^9.6"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/minos-moderation/client-php"
+        }
+    ],
+    "autoload-dev": {
+        "psr-4": {
+            "minos\\moderation\\": "",
+            "phpbb\\": "tests/stubs/phpbb/",
+            "Symfony\\": "tests/stubs/Symfony/"
+        }
+    },
+    "extra": {
+        "display-name": "Minos — moderacja postów",
+        "soft-require": {
+            "phpbb/phpbb": "~3.3"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "7.4.33"
+        },
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
