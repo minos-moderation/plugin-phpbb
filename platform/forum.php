@@ -26,6 +26,16 @@ class forum
 	/** The largest `meta.links` value the gateway keeps. */
 	const MAX_LINKS = 100000;
 
+	/** The most `meta.link_domains` the gateway keeps. */
+	const MAX_LINK_DOMAINS = 10;
+
+	/**
+	 * Second-level labels under which a country code's registrable domains sit one level
+	 * deeper (`example.co.uk`, `example.com.pl`). An approximation of the Public Suffix List,
+	 * which the extension does not bundle: a domain it misjudges is reported one level short.
+	 */
+	const SECOND_LEVEL_LABELS = array('ac', 'biz', 'co', 'com', 'edu', 'gov', 'info', 'net', 'org');
+
 	/** @var \phpbb\db\driver\driver_interface */
 	protected $db;
 
@@ -104,7 +114,9 @@ class forum
 	 *
 	 * Quotes are removed with their content: they are someone else's words, assessed with
 	 * their own post, and a reply must not be held for what it quotes. The rest loses its
-	 * formatting (BBCode, links, smilies stay as their text). The text is NOT shortened here.
+	 * formatting (BBCode, links, smilies stay as their text), but the text of `title` and
+	 * `alt` attributes is kept, after the text: words can hide there as well as anywhere.
+	 * The text is NOT shortened here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
 	 * @return string The plain text, trimmed.
@@ -116,7 +128,17 @@ class forum
 		{
 			return '';
 		}
-		$text = (string) $this->text_utils->clean_formatting($this->text_utils->remove_bbcode($xml, 'quote'));
+		$xml = (string) $this->text_utils->remove_bbcode($xml, 'quote');
+		$text = (string) $this->text_utils->clean_formatting($xml);
+		preg_match_all('/\s(?:title|alt)="([^"]*)"/', $xml, $found);
+		foreach ($found[1] as $attribute)
+		{
+			$attribute = trim(html_entity_decode($attribute, ENT_QUOTES | ENT_XML1, 'UTF-8'));
+			if ($attribute !== '')
+			{
+				$text .= "\n" . $attribute;
+			}
+		}
 		$text = str_replace(array("\r\n", "\r"), "\n", $text);
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
 		return is_string($trimmed) ? $trimmed : trim($text);
@@ -150,21 +172,57 @@ class forum
 
 	/**
 	 * The spam signals the gateway may receive about a post, and nothing else: the number of
-	 * links and, for a registered author, whether this is the author's first post. Never an
-	 * e-mail, an IP address or a user id.
+	 * links, up to ten registrable domains they point to and, for a registered author,
+	 * whether this is the author's first post. Never an e-mail, an IP address or a user id.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
-	 * @return array<string,int|bool>
+	 * @return array<string,int|bool|array<int,string>>
 	 */
 	public function meta(array $post)
 	{
-		$meta = array('links' => min(self::MAX_LINKS, (int) preg_match_all('#<URL[\s>]#', (string) $post['post_text'])));
+		$xml = (string) $post['post_text'];
+		$domains = array();
+		preg_match_all('#<URL\s[^>]*?url="([^"]*)"#', $xml, $found);
+		foreach ($found[1] as $url)
+		{
+			$domain = self::registrable_domain((string) parse_url(html_entity_decode($url, ENT_QUOTES | ENT_XML1, 'UTF-8'), PHP_URL_HOST));
+			if ($domain !== null && count($domains) < self::MAX_LINK_DOMAINS)
+			{
+				$domains[$domain] = $domain;
+			}
+		}
+		$meta = array(
+			'links'        => min(self::MAX_LINKS, (int) preg_match_all('#<URL[\s>]#', $xml)),
+			'link_domains' => array_values($domains),
+		);
 		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
 		{
 			// The post itself is unapproved, so it is not counted in user_posts yet.
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
+	}
+
+	/**
+	 * The registrable domain of a host name: `forum.example.com` → `example.com`,
+	 * `www.example.co.uk` → `example.co.uk` (see {@see SECOND_LEVEL_LABELS}).
+	 *
+	 * @param string $host A host name.
+	 * @return string|null The domain, or null for an IP address, a single label or a name
+	 *     that is not plain ASCII.
+	 */
+	public static function registrable_domain($host)
+	{
+		$host = rtrim(strtolower(trim((string) $host)), '.');
+		if ($host === '' || filter_var(trim($host, '[]'), FILTER_VALIDATE_IP) !== false
+			|| !preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $host))
+		{
+			return null;
+		}
+		$labels = explode('.', $host);
+		$count = count($labels);
+		$take = ($count >= 3 && strlen($labels[$count - 1]) === 2 && in_array($labels[$count - 2], self::SECOND_LEVEL_LABELS, true)) ? 3 : 2;
+		return implode('.', array_slice($labels, -$take));
 	}
 
 	/**

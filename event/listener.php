@@ -175,6 +175,10 @@ class listener implements EventSubscriberInterface
 		}
 		$post_row = $event['post_row'];
 		$label = htmlspecialchars($this->language->lang($this->status_key($pending)), ENT_COMPAT, 'UTF-8');
+		if (!empty($pending['truncated']))
+		{
+			$label .= ', ' . htmlspecialchars($this->language->lang('MINOS_MCP_TRUNCATED'), ENT_COMPAT, 'UTF-8');
+		}
 		if (!empty($pending['support']))
 		{
 			$label .= ', ' . htmlspecialchars($this->language->lang('MINOS_MCP_SUPPORT'), ENT_COMPAT, 'UTF-8');
@@ -208,6 +212,7 @@ class listener implements EventSubscriberInterface
 		$post_data['MINOS_STATUS'] = htmlspecialchars($this->language->lang($this->status_key($pending)), ENT_COMPAT, 'UTF-8');
 		$post_data['MINOS_CATEGORIES'] = implode(', ', $categories);
 		$post_data['S_MINOS_SUPPORT'] = !empty($pending['support']);
+		$post_data['S_MINOS_TRUNCATED'] = !empty($pending['truncated']);
 		$post_data['MINOS_MASKED'] = ($pending['status'] === pending_store::HELD && $pending['masked_text'] !== '')
 			? nl2br(htmlspecialchars((string) $pending['masked_text'], ENT_COMPAT, 'UTF-8'))
 			: '';

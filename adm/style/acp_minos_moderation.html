@@ -121,7 +121,7 @@
 	<tr>
 		<td><a href="{minos_rows.U_POST}">#{minos_rows.POST_ID}</a><!-- IF minos_rows.S_HELD --> · <a href="{minos_rows.U_MCP}">{L_MINOS_OPEN_IN_MCP}</a><!-- ENDIF --></td>
 		<td>{minos_rows.TIME}</td>
-		<td>{minos_rows.STATUS}<!-- IF minos_rows.S_SUPPORT --> · <strong>{L_MINOS_SUPPORT}</strong><!-- ENDIF --></td>
+		<td>{minos_rows.STATUS}<!-- IF minos_rows.S_TRUNCATED --> · {L_MINOS_TRUNCATED}<!-- ENDIF --><!-- IF minos_rows.S_SUPPORT --> · <strong>{L_MINOS_SUPPORT}</strong><!-- ENDIF --></td>
 		<td>{minos_rows.VERDICT}</td>
 		<td>{minos_rows.CATEGORIES}</td>
 		<td>{minos_rows.ERROR_CODE}</td>

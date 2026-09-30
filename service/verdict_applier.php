@@ -20,6 +20,10 @@ use minos\moderation\platform\forum;
  * and `zablokowane` follow their settings; anything that is not a verdict (`nieocenione`,
  * no answer in time, a refused request) follows the failure mode and is never read as one.
  * A post a moderator already dealt with is left alone.
+ *
+ * A post longer than 3000 characters was assessed on its beginning only: a block still
+ * blocks, but nothing publishes it on the gateway's word. `bezpieczne` reads as
+ * `nieocenione` (the failure mode), and `ocenzurowane` always holds.
  */
 class verdict_applier
 {
@@ -67,7 +71,7 @@ class verdict_applier
 	 * @param string      $verdict   The recorded outcome.
 	 * @param string|null $masked    The gateway's `ocenzurowany`, if any.
 	 * @param bool        $complete  Whether the gateway saw the whole text (not cut at 3000
-	 *     characters): masked text may replace only a text that was assessed whole.
+	 *     characters): only a whole text is published on the gateway's word.
 	 * @param string      $censored  {@see settings::censored_mode()}.
 	 * @param string      $blocked   {@see settings::blocked_mode()}.
 	 * @param string      $fail_mode {@see settings::fail_mode()}.
@@ -77,17 +81,22 @@ class verdict_applier
 	{
 		switch ($verdict)
 		{
-			case 'bezpieczne':
-				return self::PUBLISH;
+			case 'zablokowane':
+				return ($blocked === settings::BLOCKED_DELETE) ? self::DELETE : self::HOLD;
 
 			case 'ocenzurowane':
 				$usable = is_string($masked) && $masked !== '' && $complete;
 				return ($censored === settings::CENSORED_PUBLISH && $usable) ? self::PUBLISH_MASKED : self::HOLD;
 
-			case 'zablokowane':
-				return ($blocked === settings::BLOCKED_DELETE) ? self::DELETE : self::HOLD;
+			case 'bezpieczne':
+				if ($complete)
+				{
+					return self::PUBLISH;
+				}
+			break;
 		}
-		// `nieocenione`, a timeout, a refusal, or anything unknown: never a verdict.
+		// `nieocenione`, a timeout, a refusal, anything unknown, or `bezpieczne` about the
+		// beginning of a longer text: not a verdict on the post.
 		return ($fail_mode === settings::FAIL_OPEN) ? self::PUBLISH : self::HOLD;
 	}
 
@@ -152,7 +161,7 @@ class verdict_applier
 			}
 
 			// Claim the row first: of two concurrent appliers, only one gets here.
-			if (!$this->store->finish($post_id, $revision, $status, $original, $now))
+			if (!$this->store->finish($post_id, $revision, $status, $original, $now, array('truncated' => $complete ? 0 : 1)))
 			{
 				$this->db->sql_transaction('rollback');
 				return null;

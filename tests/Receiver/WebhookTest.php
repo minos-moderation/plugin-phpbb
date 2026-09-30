@@ -238,8 +238,20 @@ final class WebhookTest extends TestCase
 		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
 	}
 
-	public function testCensoredTextOfAPostLongerThanTheAssessedPartIsNeverPublished(): void
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function bothFailureModes(): array
 	{
+		return array('fail-open' => array(settings::FAIL_OPEN), 'fail-closed' => array(settings::FAIL_CLOSED));
+	}
+
+	/**
+	 * @dataProvider bothFailureModes
+	 */
+	public function testCensoredTextOfAPostLongerThanTheAssessedPartIsNeverPublished(string $mode): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => $mode, settings::CENSORED => settings::CENSORED_PUBLISH));
 		$id = $this->pending(str_repeat('Długi testowy wpis. ', 200));
 
 		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => str_repeat('█', 3000))));
@@ -247,6 +259,57 @@ final class WebhookTest extends TestCase
 		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'],
 			'publishing the masked 3000 characters would cut the rest of the post off');
 		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		self::assertSame('1', $this->board->row($id)['truncated']);
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testSafeAboutTheBeginningOfALongerPostIsNotAVerdictOnThePost(string $mode, int $visibility, string $status): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$id = $this->pending(str_repeat('Długi testowy wpis. ', 200));
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne'));
+
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame($status, $this->board->row($id)['status']);
+		self::assertSame('1', $this->board->row($id)['truncated']);
+	}
+
+	public function testAHeldLongerPostCarriesANoteForTheModerator(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_CLOSED));
+		$id = $this->pending(str_repeat('Długi testowy wpis. ', 200));
+		$this->board->deliver(self::verdict($id, 'bezpieczne'));
+
+		$queue = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
+		$this->board->listener->mark_queue_row($queue);
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+
+		self::assertStringContainsString('oceniono 3000 pierwszych znaków', $queue['post_row']['POST_SUBJECT']);
+		self::assertTrue($details['post_data']['S_MINOS_TRUNCATED']);
+	}
+
+	public function testABlockOfTheBeginningOfALongerPostStillBlocks(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN, settings::BLOCKED => settings::BLOCKED_DELETE));
+		$id = $this->pending(str_repeat('Długi testowy wpis. ', 200));
+
+		$this->board->deliver(self::verdict($id, 'zablokowane'));
+
+		self::assertSame(ITEM_DELETED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testAPostOfExactly3000CharactersIsAssessedWhole(): void
+	{
+		$id = $this->pending(str_repeat('ż', 3000));
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne'));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame('0', $this->board->row($id)['truncated']);
 	}
 
 	public function testBlockedIsHeldByDefault(): void

@@ -169,6 +169,7 @@ class acp
 				'CATEGORIES' => self::escape(str_replace(',', ', ', (string) $row['categories'])),
 				'ERROR_CODE' => self::escape((string) $row['error_code']),
 				'S_SUPPORT'  => !empty($row['support']),
+				'S_TRUNCATED' => !empty($row['truncated']),
 				'S_HELD'     => $row['status'] === pending_store::HELD,
 				'TIME'       => $this->user->format_date((int) $row['submitted_at']),
 			));

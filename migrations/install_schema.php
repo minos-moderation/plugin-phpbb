@@ -46,6 +46,7 @@ class install_schema extends \phpbb\db\migration\migration
 						'verdict'       => array('VCHAR:40', ''),
 						'categories'    => array('VCHAR:255', ''),
 						'support'       => array('BOOL', 0),
+						'truncated'     => array('BOOL', 0),
 						'attempts'      => array('USINT', 0),
 						'submitted_at'  => array('TIMESTAMP', 0),
 						'retry_at'      => array('TIMESTAMP', 0),

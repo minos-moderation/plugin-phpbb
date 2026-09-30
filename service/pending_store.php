@@ -272,11 +272,13 @@ class pending_store
 	 * @param string $status        A final status.
 	 * @param string $original_text The post's stored text before it was replaced, or ''.
 	 * @param int    $now           Unix seconds.
+	 * @param array<string,int|string> $extra Other columns: `truncated` (the gateway saw only
+	 *     the first 3000 characters).
 	 * @return bool False when the row is not `received` (someone else applied it).
 	 */
-	public function finish($post_id, $revision, $status, $original_text, $now)
+	public function finish($post_id, $revision, $status, $original_text, $now, array $extra = array())
 	{
-		return $this->update(array(
+		return $this->update(array_intersect_key($extra, array_flip(array('truncated'))) + array(
 			'status'        => $status,
 			'original_text' => (string) $original_text,
 			'handled_at'    => (int) $now,

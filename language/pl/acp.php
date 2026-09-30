@@ -19,7 +19,7 @@ if (empty($lang) || !is_array($lang))
 }
 
 $lang = array_merge($lang, array(
-	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu (pierwsze 3000 znaków, bez cytatów i formatowania), liczba linków i informacja, czy to pierwszy post autora — nigdy e-mail, adres IP ani identyfikator użytkownika.',
+	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu (pierwsze 3000 znaków, bez cytatów i formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora — nigdy e-mail, adres IP ani identyfikator użytkownika.',
 	'MINOS_ACP_SAVED'            => 'Ustawienia zostały zapisane.',
 	'MINOS_ACP_NOT_READY'        => 'Rozszerzenie nie wstrzymuje teraz żadnych postów: włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
 	'MINOS_ACP_READY'            => 'Rozszerzenie działa: nowe posty są oceniane przed publikacją.',
@@ -46,7 +46,7 @@ $lang = array_merge($lang, array(
 	'MINOS_TIMEOUT'              => 'Czas oczekiwania na werdykt',
 	'MINOS_TIMEOUT_EXPLAIN'      => 'W minutach. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (i zapasie) post obsługuje tryb awarii.',
 	'MINOS_CENSORED'             => 'Werdykt „ocenzurowane”',
-	'MINOS_CENSORED_EXPLAIN'     => 'Publikacja zastępuje tekst postu wersją z zamaskowanymi fragmentami (bez formatowania). Post dłuższy niż 3000 znaków zawsze zostaje w kolejce: brama widziała tylko jego początek.',
+	'MINOS_CENSORED_EXPLAIN'     => 'Publikacja zastępuje tekst postu wersją z zamaskowanymi fragmentami (bez formatowania). Post dłuższy niż 3000 znaków zawsze zostaje w kolejce: brama widziała tylko jego początek. Z tego samego powodu werdykt „bezpieczne” dla takiego postu obsługuje tryb awarii.',
 	'MINOS_CENSORED_PUBLISH'     => 'Publikuj tekst z zamaskowanymi fragmentami',
 	'MINOS_CENSORED_HOLD'        => 'Zostaw w kolejce do zatwierdzenia',
 	'MINOS_BLOCKED'              => 'Werdykt „zablokowane”',
@@ -73,6 +73,7 @@ $lang = array_merge($lang, array(
 	'MINOS_COL_CATEGORIES'       => 'Kategorie',
 	'MINOS_COL_ERROR'            => 'Kod błędu',
 	'MINOS_SUPPORT'              => 'potrzebne wsparcie',
+	'MINOS_TRUNCATED'            => 'oceniono 3000 pierwszych znaków',
 	'MINOS_OPEN_IN_MCP'          => 'Otwórz w panelu moderatora',
 
 	'MINOS_STATUS_QUEUED'        => 'Do wysłania',

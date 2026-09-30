@@ -68,7 +68,7 @@ final class SubmitterTest extends TestCase
 		}
 		foreach ($meta as $one)
 		{
-			self::assertSame(array(), array_diff(array_keys($one), array('links', 'author_first_post')));
+			self::assertSame(array(), array_diff(array_keys($one), array('links', 'link_domains', 'author_first_post')));
 		}
 		self::assertFalse($meta[0]['author_first_post']);
 		self::assertTrue($meta[1]['author_first_post']);
@@ -116,6 +116,55 @@ final class SubmitterTest extends TestCase
 		self::assertStringNotContainsString('[b]', $item['tekst']);
 		self::assertStringContainsString('pogrubieniem', $item['tekst']);
 		self::assertSame(2, $item['meta']['links']);
+	}
+
+	public function testTitleAndAltTextIsAssessedWithTheRest(): void
+	{
+		$xml = '<r>Zobacz obrazek <IMG src="https://example.org/a.png" alt="podpis &quot;w&quot; atrybucie alt">'
+			. '<s>[img]</s>https://example.org/a.png<e>[/img]</e></IMG> i <ABBR title="ukryty tytuł"><s>[abbr]</s>skrót<e>[/abbr]</e></ABBR>.</r>';
+
+		$this->board->posting('', 'post', array('xml' => $xml));
+
+		$text = $this->gateway->items(0)[0]['tekst'];
+		self::assertStringContainsString('skrót', $text);
+		self::assertStringContainsString('podpis "w" atrybucie alt', $text);
+		self::assertStringContainsString('ukryty tytuł', $text);
+	}
+
+	public function testLinkDomainsAreTheRegistrableDomainsOfTheLinksAtMostTen(): void
+	{
+		$links = array('https://forum.example.org/a', 'http://www.example.org/b', 'https://sklep.example.co.uk/', 'https://example.com.pl/x',
+			'http://192.0.2.7/ip', 'https://[2001:db8::1]/ip6', 'https://localhost/');
+		for ($i = 1; $i <= 12; $i++)
+		{
+			$links[] = 'https://strona' . $i . '.example' . $i . '.net/';
+		}
+		$xml = '<r>';
+		foreach ($links as $link)
+		{
+			$xml .= '<URL url="' . htmlspecialchars($link) . '">' . htmlspecialchars($link) . '</URL> ';
+		}
+		$xml .= '</r>';
+
+		$this->board->posting('', 'post', array('xml' => $xml));
+
+		$meta = $this->gateway->items(0)[0]['meta'];
+		self::assertSame(count($links), $meta['links']);
+		self::assertCount(10, $meta['link_domains']);
+		self::assertSame(array('example.org', 'example.co.uk', 'example.com.pl', 'example1.net'), array_slice($meta['link_domains'], 0, 4),
+			'one entry per registrable domain; no IP address, no single label');
+		foreach ($meta['link_domains'] as $domain)
+		{
+			self::assertMatchesRegularExpression('/^[a-z0-9-]+(\.[a-z0-9-]+)+$/', $domain);
+		}
+	}
+
+	public function testAPostWithoutLinksSendsNoDomains(): void
+	{
+		$this->board->posting('Wpis bez linków.');
+
+		self::assertSame(array('links' => 0, 'link_domains' => array()), array_intersect_key(
+			$this->gateway->items(0)[0]['meta'], array('links' => 1, 'link_domains' => 1)));
 	}
 
 	public function testTheProfileSettingIsSent(): void
