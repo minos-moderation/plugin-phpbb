@@ -50,6 +50,7 @@ final class NotificationTest extends TestCase
 
 		self::assertSame(array(
 			'add notification.type.bookmark'         => 1,
+			'add notification.type.forum'            => 1,
 			'add notification.type.post'             => 1,
 			'add notification.type.quote'            => 1,
 			'delete notification.type.post_in_queue' => 1,

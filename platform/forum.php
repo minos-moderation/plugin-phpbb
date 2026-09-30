@@ -269,8 +269,9 @@ class forum
 
 	/**
 	 * Approves a post held in the queue, as a moderator's approval would, and sends the
-	 * notifications phpBB withheld while it waited (the author is not notified: from their
-	 * side the post simply appears).
+	 * notifications phpBB withheld while it waited - those `submit_post()` sends for an approved
+	 * post: the topic's, or for a reply the bookmark, post and forum ones, and the quote one.
+	 * The author is not notified: from their side the post simply appears.
 	 *
 	 * phpBB's `content_visibility` sends no notification of its own, so these are the only
 	 * ones; a post that is no longer in the queue was approved on phpBB's own path (the MCP),
@@ -304,6 +305,7 @@ class forum
 			$this->notifications->add_notifications(array(
 				'notification.type.bookmark',
 				'notification.type.post',
+				'notification.type.forum',
 			), $post);
 		}
 		$this->notifications->add_notifications(array('notification.type.quote'), $post);

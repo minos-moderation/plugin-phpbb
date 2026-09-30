@@ -83,8 +83,15 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    bazie. Jeśli zapis się nie uda, post zostaje w kolejce — oryginalny tekst nigdy nie
    zostaje opublikowany zamiast zamaskowanego.
 4. Każda decyzja rozszerzenia trafia do dziennika moderatorów (autor wpisu: Anonymous, opis:
-   „Minos …”). Powiadomienia o nowym poście wychodzą raz, w chwili publikacji przez
-   rozszerzenie; jeśli post zatwierdził moderator, powiadamia wyłącznie phpBB.
+   „Minos …”). Powiadomienia o nowym poście (dla obserwujących temat i forum, zakładki,
+   cytowanych) wychodzą raz, w chwili publikacji przez rozszerzenie; jeśli post zatwierdził
+   moderator, powiadamia wyłącznie phpBB.
+
+   Uwaga: dla każdego wstrzymanego postu phpBB od razu, jeszcze przed werdyktem, wysyła
+   moderatorom swoje zwykłe powiadomienie (także e-mailem, jeśli mają je włączone), że post
+   lub temat czeka w kolejce. Gdy rozszerzenie opublikuje post, to powiadomienie zostaje
+   wycofane z listy powiadomień, ale wysłanego e-maila nie da się cofnąć. Moderatorzy, którym
+   to przeszkadza, mogą wyłączyć e-maile „post/temat czeka na zatwierdzenie” w swoim panelu.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.

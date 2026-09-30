@@ -46,6 +46,7 @@ final class WebhookTest extends TestCase
 		$this->board->deliver(self::verdict($reply['post_id'], 'bezpieczne'));
 
 		self::assertContains(array('add', 'notification.type.post', $reply['post_id']), $this->board->notifications->calls);
+		self::assertContains(array('add', 'notification.type.forum', $reply['post_id']), $this->board->notifications->calls);
 		self::assertNotContains(array('add', 'notification.type.topic', $reply['post_id']), $this->board->notifications->calls);
 	}
 
