@@ -26,7 +26,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `styles/all/template/event/` | The MCP note above a queued post. |
 | `migrations/` | The table; the settings and the ACP module. |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
-| `bin/build-zip.sh` | The installable package. |
+| `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 
 ## The life of a post
 
@@ -44,21 +44,39 @@ The recorded outcome is applied in one database transaction together with the ro
 to its final status. The webhook applies it after its answer (`kernel.terminate`); if that
 does not happen, the row stays `received` and the cron task applies it.
 
+A row that timed out (`verdict = timeout`, final `published` or `held`) takes a verdict that
+arrives late. A fail-open publication is marked on the row (`approved_at`, `approved_md5`);
+a late verdict applies to the published post only while phpBB still shows the extension's
+own approval (`post_delete_user = ANONYMOUS` and `post_delete_time = approved_at`: phpBB
+records who changed a post's visibility and when) and the text it approved (the MD5). Any
+other change - a moderator's deletion, restoration or approval, an edit - supersedes it.
+"Back to the queue" is phpBB's `ITEM_REAPPROVE`, which the MCP queue lists.
+
 ## Decisions worth knowing
 
+- **Fail-closed is the default** (as in the WordPress and MyBB plugins): an unassessed post
+  waits for a human. An unrecognised stored value reads as fail-closed too.
+- **Switched off, the extension does nothing**: the webhook answers `404` before reading
+  anything, nothing is sent, the cron task is not runnable. Held posts wait for moderators.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
   moderators and not sent: nothing would be done with its verdict.
-- **Fail-open is the default**, so a misconfigured new installation does not turn the forum
-  into a manually moderated one; an unrecognised stored value reads as fail-closed.
+- **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
+  characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
+  `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
+- **A masked text is published only once it is stored**: the update is checked and the text
+  read back; otherwise everything rolls back and the post is held (`mask_failed`).
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an
-  unapproved → deleted change as if the post had been counted, lowering `user_posts` and
+  unapproved -> deleted change as if the post had been counted, lowering `user_posts` and
   `num_posts`; approve-then-delete inside one transaction keeps the counters right.
-- **Masked text replaces only a whole text.** The gateway sees the first 3000 characters;
-  publishing its masked version of a longer post would cut the rest off, so such a post is
-  held.
+- **Notifications once.** `content_visibility` sends none; the extension's approval sends
+  what the MCP's approval would (topic, or post and bookmark; quote), and the adapter never
+  approves a post that is not in the queue, so phpBB's own path is never doubled.
 - **The key and the secret** live in `config_text`, are read raw from the ACP form (phpBB's
-  `request->variable()` would HTML-escape a secret), and are shown back only as a prefix.
+  `request->variable()` would HTML-escape a secret), and are shown back only as a prefix. A
+  stored secret that is not 16-255 visible characters refuses every delivery.
+- **`link_domains`** approximates registrable domains without the Public Suffix List: two
+  labels, three under a country code's `co`/`com`/`net`/`org`/`edu`/`gov`/`ac`/`info`/`biz`.
 - **`language/en/` holds the Polish texts.** phpBB falls back to `en` when the user's
   language has no file of the extension; the extension speaks Polish, and identical files
   mean nobody sees raw keys. `tests/Repo/LanguageTest.php` keeps them identical.
@@ -80,12 +98,12 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body → `401`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields, no e-mail/IP/user id, the 3000-character cut, quotes and markup left out); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers); `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, quotes and markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id. |
-| `tests/Extension` | phpBB's metadata rules, the migration defaults, the service wiring against the constructors, the route, the bundled client's location. |
+| `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
 
@@ -124,8 +142,11 @@ repository; `composer.lock` pins the commit. When `client-php` is tagged, `dev-m
 phpBB does not autoload an extension's `vendor/`, and requiring the bundled
 `vendor/autoload.php` would register a second Composer class loader next to phpBB's own, so
 `client_loader.php` maps `Minos\Client\` onto `vendor/minos-moderation/client-php/src/`
-itself. `bin/build-zip.sh` assembles the package from `composer.lock` without development
-packages and keeps only the client's `src/`, `LICENSE` and `composer.json`.
+itself. `bin/build-zip.sh` installs the client from `composer.lock` without development
+packages; `bin/package.php` packs what phpBB loads and the client's `src/*.php` and
+`LICENSE` only - no `composer.lock`, no dependency manifest, no tests, no mock. The
+extension's own `composer.json` ships, reduced to its metadata, because phpBB's
+`metadata_manager` refuses an extension without it.
 
 ## phpBB APIs
 
@@ -139,10 +160,12 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   in `app.php`, with phpBB's own terminate subscriber at the lowest priority;
 - `submit_post()` honouring `force_approved_state`, committing before its notifications and
   `core.submit_post_end`; `posting.php` showing the "awaits approval" message for it;
-- `content_visibility::set_post_visibility()` (ITEM_APPROVED / ITEM_DELETED only; its
-  unapproved → deleted accounting), and `mcp_queue::approve_posts()` as the model for the
-  approval and its notifications (`notification_manager::add_notifications()` /
-  `delete_notifications()`);
+- `content_visibility::set_post_visibility()` (ITEM_APPROVED / ITEM_DELETED /
+  ITEM_REAPPROVE only; its unapproved → deleted accounting; `post_delete_user` and
+  `post_delete_time` written on every change; no notification of its own), and
+  `mcp_queue::approve_posts()` as the model for the approval and its notifications
+  (`notification_manager::add_notifications()` / `delete_notifications()`); the MCP queue
+  listing ITEM_UNAPPROVED and ITEM_REAPPROVE posts;
 - `textformatter\utils_interface::remove_bbcode()`, `clean_formatting()`;
   `parser_interface::parse()`, `disable_bbcodes()`, `disable_smilies()`,
   `disable_magic_url()` and their `enable_*`; `message_parser` feeding the parser raw text;
@@ -154,8 +177,8 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   session id, `make_forum_select()`, `add_form_key()` / `check_form_key()`;
 - the ACP module discovery (`acp/*_module` with its `*_info`), the migration tools
   `config.add`, `config_text.add`, `module.add`, the schema types, `depends_on()` on
-  `\phpbb\db\migration\data\v330\v330`, the cron task base and the `cron.task` tag, and the
-  extension metadata rules of `metadata_manager`.
+  `\phpbb\db\migration\data\v330\v330`, the cron task base (`is_runnable()`) and the
+  `cron.task` tag, and `metadata_manager` (it requires `composer.json` and its fields).
 
 Not verified by running: the extension has not been installed on a live phpBB board. In
 particular, whether phpBB's renderer shows the parser's output for a masked text exactly as
