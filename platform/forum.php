@@ -262,12 +262,20 @@ class forum
 	 * notifications phpBB withheld while it waited (the author is not notified: from their
 	 * side the post simply appears).
 	 *
+	 * phpBB's `content_visibility` sends no notification of its own, so these are the only
+	 * ones; a post that is no longer in the queue was approved on phpBB's own path (the MCP),
+	 * which notified already, and is left alone.
+	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
 	 * @param int                 $time The moment, stored by phpBB with the change.
-	 * @return void
+	 * @return bool False when the post was not in the queue (nothing done).
 	 */
 	public function approve(array $post, $time)
 	{
+		if (!$this->awaits_approval($post))
+		{
+			return false;
+		}
 		$this->set_visibility(ITEM_APPROVED, $post, '', $time);
 
 		if (!(int) $post['topic_posts_approved'])
@@ -284,6 +292,7 @@ class forum
 		}
 		$this->notifications->add_notifications(array('notification.type.quote'), $post);
 		$this->notifications->delete_notifications('notification.type.post_in_queue', (int) $post['post_id']);
+		return true;
 	}
 
 	/**
