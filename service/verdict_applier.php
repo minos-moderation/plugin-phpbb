@@ -39,6 +39,9 @@ class verdict_applier
 	/** Soft-delete the post. */
 	const DELETE = 'delete';
 
+	/** The masked text could not be stored (also the error code recorded on the row). */
+	const MASK_FAILED = 'mask_failed';
+
 	/** @var settings */
 	protected $settings;
 
@@ -104,13 +107,33 @@ class verdict_applier
 	 * Applies the recorded outcome of one post, once.
 	 *
 	 * The row's move to its final status and the change to the post share one transaction:
-	 * if either fails, both roll back and the row stays `received`, for the cron task.
+	 * if either fails, both roll back and the row stays `received`, for the cron task. When
+	 * the masked text cannot be stored, everything rolls back and the post is held instead:
+	 * its original text is never published in place of the masked one.
 	 *
 	 * @param int $post_id The post.
 	 * @param int $now     Unix seconds.
 	 * @return string|null The final status, or null when there was nothing to apply.
 	 */
 	public function apply($post_id, $now)
+	{
+		$status = $this->attempt($post_id, $now, false);
+		if ($status === self::MASK_FAILED)
+		{
+			$status = $this->attempt($post_id, $now, true);
+		}
+		return $status;
+	}
+
+	/**
+	 * One attempt at {@see apply}.
+	 *
+	 * @param int  $post_id     The post.
+	 * @param int  $now         Unix seconds.
+	 * @param bool $mask_failed Whether an earlier attempt could not store the masked text.
+	 * @return string|null The final status, {@see MASK_FAILED}, or null.
+	 */
+	protected function attempt($post_id, $now, $mask_failed)
 	{
 		$row = $this->store->find($post_id);
 		if ($row === null || $row['status'] !== pending_store::RECEIVED)
@@ -136,6 +159,12 @@ class verdict_applier
 				$this->settings->censored_mode(), $this->settings->blocked_mode(), $this->settings->fail_mode());
 
 			$original = '';
+			$extra = array('truncated' => $complete ? 0 : 1);
+			if ($action === self::PUBLISH_MASKED && $mask_failed)
+			{
+				$action = self::HOLD;
+				$extra['error_code'] = self::MASK_FAILED;
+			}
 			switch ($action)
 			{
 				case self::PUBLISH:
@@ -161,7 +190,7 @@ class verdict_applier
 			}
 
 			// Claim the row first: of two concurrent appliers, only one gets here.
-			if (!$this->store->finish($post_id, $revision, $status, $original, $now, array('truncated' => $complete ? 0 : 1)))
+			if (!$this->store->finish($post_id, $revision, $status, $original, $now, $extra))
 			{
 				$this->db->sql_transaction('rollback');
 				return null;
@@ -173,7 +202,13 @@ class verdict_applier
 			}
 			else if ($action === self::PUBLISH_MASKED)
 			{
-				$this->forum->approve($this->forum->replace_text($post, (string) $masked));
+				$masked_post = $this->forum->replace_text($post, (string) $masked);
+				if ($masked_post === null)
+				{
+					$this->db->sql_transaction('rollback');
+					return self::MASK_FAILED;
+				}
+				$this->forum->approve($masked_post);
 			}
 			else if ($action === self::DELETE)
 			{

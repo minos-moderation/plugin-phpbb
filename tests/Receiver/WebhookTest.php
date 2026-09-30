@@ -214,6 +214,41 @@ final class WebhookTest extends TestCase
 			'the parser is left as it was found');
 	}
 
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function failingTextUpdates(): array
+	{
+		return array(
+			'the update is ignored' => array('BEFORE UPDATE OF post_text ON phpbb_posts BEGIN SELECT RAISE(IGNORE); END'),
+			'the stored text differs' => array("AFTER UPDATE OF post_text ON phpbb_posts BEGIN UPDATE phpbb_posts SET post_text = '<t>inny</t>' WHERE post_id = NEW.post_id; END"),
+		);
+	}
+
+	/**
+	 * @dataProvider failingTextUpdates
+	 */
+	public function testAMaskedTextThatCannotBeStoredKeepsThePostQueuedAndNeverPublishesTheOriginal(string $trigger): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN, settings::CENSORED => settings::CENSORED_PUBLISH));
+		$id = $this->pending('To jest brzydkie słowo w teście.');
+		$original = $this->board->post($id)['post_text'];
+		$this->board->db->pdo->exec('CREATE TRIGGER minos_test_text ' . $trigger);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ████████ słowo w teście.'))));
+
+		$post = $this->board->post($id);
+		self::assertSame(ITEM_UNAPPROVED, (int) $post['post_visibility']);
+		self::assertSame($original, $post['post_text'], 'the attempt is rolled back');
+		self::assertSame(array(), $this->board->visibility->calls, 'nothing is approved');
+		$row = $this->board->row($id);
+		self::assertSame(pending_store::HELD, $row['status']);
+		self::assertSame('mask_failed', $row['error_code']);
+		self::assertSame('To jest ████████ słowo w teście.', $row['masked_text'], 'kept for the moderator');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_HELD'));
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_MASKED'));
+	}
+
 	public function testCensoredWithHoldKeepsThePostQueuedWithTheMaskedTextForTheModerator(): void
 	{
 		$this->board->configure(array(settings::CENSORED => settings::HOLD));

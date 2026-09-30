@@ -310,11 +310,13 @@ class forum
 	 * Replaces a post's text with a plain text (the gateway's `ocenzurowany`).
 	 *
 	 * The text is parsed with BBCode, smilies and automatic links switched off, so what the
-	 * gateway returned is shown exactly as returned.
+	 * gateway returned is shown exactly as returned. The update is checked and the stored
+	 * text read back: a caller publishes only a text that is really there.
 	 *
 	 * @param array<string,mixed> $post  A row from {@see load_post}.
 	 * @param string              $plain The new text.
-	 * @return array<string,mixed> The post with its new text.
+	 * @return array<string,mixed>|null The post with its new text, or null when the stored
+	 *     text is not the new one (the caller rolls back and must not publish).
 	 */
 	public function replace_text(array $post, $plain)
 	{
@@ -326,12 +328,24 @@ class forum
 		$this->parser->enable_smilies();
 		$this->parser->enable_magic_url();
 
-		$this->db->sql_query('UPDATE ' . $this->posts_table . ' SET ' . $this->db->sql_build_array('UPDATE', array(
+		$updated = $this->db->sql_query('UPDATE ' . $this->posts_table . ' SET ' . $this->db->sql_build_array('UPDATE', array(
 			'post_text'       => $xml,
 			'bbcode_uid'      => '',
 			'bbcode_bitfield' => '',
 			'post_checksum'   => md5((string) $plain),
 		)) . ' WHERE post_id = ' . (int) $post['post_id']);
+		if ($updated === false || $xml === '')
+		{
+			return null;
+		}
+
+		$result = $this->db->sql_query('SELECT post_text FROM ' . $this->posts_table . ' WHERE post_id = ' . (int) $post['post_id']);
+		$stored = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		if (!$stored || (string) $stored['post_text'] !== $xml)
+		{
+			return null;
+		}
 
 		$post['post_text'] = $xml;
 		return $post;
