@@ -247,14 +247,15 @@ class forum
 	}
 
 	/**
-	 * Whether a post is still in the approval queue as the extension left it.
+	 * Whether a post is in the approval queue: new (unapproved) or edited after publication
+	 * (phpBB's re-approve state).
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
 	 * @return bool
 	 */
 	public function awaits_approval(array $post)
 	{
-		return (int) $post['post_visibility'] === ITEM_UNAPPROVED;
+		return in_array((int) $post['post_visibility'], array(ITEM_UNAPPROVED, ITEM_REAPPROVE), true);
 	}
 
 	/**
@@ -278,12 +279,18 @@ class forum
 		}
 		$this->set_visibility(ITEM_APPROVED, $post, '', $time);
 
+		// A post back from the re-approve state was announced when first published: as in the
+		// MCP, only a first publication notifies the watchers.
+		$first_publication = ((int) $post['post_visibility'] === ITEM_UNAPPROVED);
 		if (!(int) $post['topic_posts_approved'])
 		{
 			$this->notifications->delete_notifications('notification.type.topic_in_queue', (int) $post['topic_id']);
-			$this->notifications->add_notifications(array('notification.type.topic'), $post);
+			if ($first_publication)
+			{
+				$this->notifications->add_notifications(array('notification.type.topic'), $post);
+			}
 		}
-		else
+		else if ($first_publication)
 		{
 			$this->notifications->add_notifications(array(
 				'notification.type.bookmark',

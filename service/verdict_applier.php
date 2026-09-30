@@ -173,11 +173,14 @@ class verdict_applier
 		try
 		{
 			$post = $this->forum->load_post($post_id);
+			$sent = (string) $row['sent_md5'];
 			if ($post === null
 				|| ($late && !$this->forum->untouched_since_approval($post, $approved_at, (string) $row['approved_md5']))
-				|| (!$late && !$this->forum->awaits_approval($post)))
+				|| (!$late && !$this->forum->awaits_approval($post))
+				|| ($sent !== '' && !hash_equals($sent, md5(forum::first_chars($this->forum->plain_text((string) $post['post_text']))))))
 			{
-				// Gone, or dealt with by someone else: that decision stands.
+				// Gone, dealt with by someone else, or no longer the text that was sent: the
+				// outcome is not about this post as it is, and that decision stands.
 				$status = $this->store->finish($post_id, $revision, pending_store::SUPERSEDED, '', $now, array('approved_at' => 0, 'approved_md5' => ''))
 					? pending_store::SUPERSEDED : null;
 				$this->db->sql_transaction('commit');

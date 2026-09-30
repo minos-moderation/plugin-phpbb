@@ -144,6 +144,7 @@ class submitter
 			}
 			$batch[] = array(
 				'row'  => $row,
+				'md5'  => md5($text),
 				'item' => array(
 					'id'     => self::item_id((int) $row['post_id'], (int) $row['revision']),
 					'tekst'  => $text,
@@ -166,7 +167,7 @@ class submitter
 	/**
 	 * One request, and what its answer means for each of its rows.
 	 *
-	 * @param array<int,array{row:array<string,mixed>,item:array<string,mixed>}> $batch The items.
+	 * @param array<int,array{row:array<string,mixed>,md5:string,item:array<string,mixed>}> $batch The items.
 	 * @param int                                                                $now   Unix seconds.
 	 * @return void
 	 */
@@ -200,7 +201,7 @@ class submitter
 			{
 				foreach ($batch as $entry)
 				{
-					$this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision']);
+					$this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $entry['md5']);
 				}
 				return;
 			}
@@ -260,7 +261,7 @@ class submitter
 	/**
 	 * Schedules another attempt for every row of a batch.
 	 *
-	 * @param array<int,array{row:array<string,mixed>,item:array<string,mixed>}> $batch       The items.
+	 * @param array<int,array{row:array<string,mixed>,md5:string,item:array<string,mixed>}> $batch       The items.
 	 * @param int|null                                                           $retry_after The gateway's `ponow_za_s`.
 	 * @param string                                                             $code        Why, for the ACP.
 	 * @param int                                                                $now         Unix seconds.
@@ -279,7 +280,7 @@ class submitter
 			{
 				$pause = min(self::MAX_BACKOFF_S, self::FIRST_BACKOFF_S * (2 ** min(10, (int) $row['attempts'])));
 			}
-			$this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code);
+			$this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code, $entry['md5']);
 		}
 	}
 }

@@ -21,8 +21,9 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * Posting: a new topic or reply is put into the approval queue before phpBB stores it
  * (`core.posting_modify_submit_post_before`, `force_approved_state`), and sent to the gateway
- * once it has an id (`core.submit_post_end`). An edit of a post that still waits starts its
- * assessment again, so a verdict never publishes text the gateway did not see.
+ * once it has an id (`core.submit_post_end`). An edit of a post that still waits, or that a
+ * time-out left unassessed, starts its assessment again, so a verdict never publishes text
+ * the gateway did not see.
  *
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
  * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
@@ -113,12 +114,14 @@ class listener implements EventSubscriberInterface
 		if ($mode === 'edit')
 		{
 			$row = $this->store->find((int) $event['post_id']);
-			if ($row === null || !in_array($row['status'], pending_store::UNSETTLED, true))
+			$post = ($row !== null) ? $this->forum->load_post((int) $event['post_id']) : null;
+			if ($row === null || $post === null || !pending_store::is_reopenable($row))
 			{
 				return;
 			}
-			// The waiting verdict is for the old text: the edit stays queued and goes again.
-			$data['force_approved_state'] = ITEM_UNAPPROVED;
+			// A waiting or late verdict is for the old text: the edited post goes (back) into
+			// the queue - phpBB's re-approve state if it was published - and is sent again.
+			$data['force_approved_state'] = ((int) $post['post_visibility'] === ITEM_APPROVED) ? ITEM_REAPPROVE : ITEM_UNAPPROVED;
 			$data[self::FLAG] = self::REASSESS;
 			$event['data'] = $data;
 			return;
@@ -144,7 +147,8 @@ class listener implements EventSubscriberInterface
 		$data = $event['data'];
 		$flag = isset($data[self::FLAG]) ? $data[self::FLAG] : null;
 		$post_id = isset($data['post_id']) ? (int) $data['post_id'] : 0;
-		if ($flag === null || $post_id <= 0 || (int) $event['post_visibility'] !== ITEM_UNAPPROVED || !$this->settings->enabled())
+		if ($flag === null || $post_id <= 0 || !in_array((int) $event['post_visibility'], array(ITEM_UNAPPROVED, ITEM_REAPPROVE), true)
+			|| !$this->settings->enabled())
 		{
 			return;
 		}

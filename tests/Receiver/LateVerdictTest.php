@@ -195,6 +195,79 @@ final class LateVerdictTest extends TestCase
 		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
 	}
 
+	public function testAnEditOfAPostHeldByATimeoutIsAssessedAgainAndTheOldVerdictIsDropped(): void
+	{
+		// The review's sequence: held by a fail-closed time-out, edited, then a late verdict
+		// for the text before the edit.
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_CLOSED));
+		$id = $this->board->posting('Pierwsza, oceniana treść.')['post_id'];
+		$this->board->sweeper()->sweep($this->timeout);
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+
+		$this->board->edit($id, 'Druga treść, której brama nie widziała.');
+
+		$row = $this->board->row($id);
+		self::assertSame('1', $row['revision']);
+		self::assertSame(pending_store::PENDING, $row['status']);
+		$item = $this->gateway->items(1)[0];
+		self::assertSame(array('phpbb:' . $id . '.1', 'Druga treść, której brama nie widziała.'), array($item['id'], $item['tekst']));
+
+		self::assertSame(200, $this->late($id, 'bezpieczne'));
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the old verdict publishes nothing');
+
+		$this->board->deliver(array('id' => 'phpbb:' . $id . '.1', 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne'));
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testAnEditOfAPostTheFailOpenModePublishedTakesItBackForAssessment(): void
+	{
+		$id = $this->published_by_fail_open('Pierwsza, oceniana treść.');
+
+		$this->board->edit($id, 'Druga treść, której brama nie widziała.');
+
+		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility']);
+		$row = $this->board->row($id);
+		self::assertSame(array('1', pending_store::PENDING, '0'), array($row['revision'], $row['status'], $row['approved_at']));
+
+		self::assertSame(200, $this->late($id, 'bezpieczne'));
+		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility']);
+
+		$this->board->deliver(array('id' => 'phpbb:' . $id . '.1', 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne'));
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+		$topics = array_filter($this->board->notifications->calls, static function (array $call) {
+			return $call[0] === 'add' && $call[1] === 'notification.type.topic';
+		});
+		self::assertCount(1, $topics, 'announced when first published, not again');
+	}
+
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function rowsWhoseTextChangesOutsideTheExtension(): array
+	{
+		return array('held by a time-out' => array('timeout'), 'waiting' => array('waiting'));
+	}
+
+	/**
+	 * @dataProvider rowsWhoseTextChangesOutsideTheExtension
+	 */
+	public function testAVerdictIsNeverAppliedToTextOtherThanTheTextSent(string $state): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_CLOSED));
+		$id = $this->board->posting('Pierwsza, oceniana treść.')['post_id'];
+		if ($state === 'timeout')
+		{
+			$this->board->sweeper()->sweep($this->timeout);
+		}
+		// Changed on a path the extension does not see (another extension, a script).
+		$this->board->db->sql_query("UPDATE phpbb_posts SET post_text = '<t>Treść podmieniona bez edycji.</t>' WHERE post_id = " . $id);
+
+		self::assertSame(200, $this->late($id, 'bezpieczne'));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
+	}
+
 	public function testARepeatedLateVerdictChangesNothing(): void
 	{
 		$id = $this->published_by_fail_open();

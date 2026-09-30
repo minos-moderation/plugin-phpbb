@@ -19,7 +19,8 @@ namespace minos\moderation\service;
  * gateway's own `202`, and the cron task racing the webhook each change a row at most once.
  *
  * `revision` counts edits of a post while it waits: a verdict for an earlier revision never
- * applies to the edited text.
+ * applies to the edited text. `sent_md5` is the digest of the text last sent, so a verdict
+ * is applied only to that text, however the post was changed meanwhile.
  */
 class pending_store
 {
@@ -206,14 +207,15 @@ class pending_store
 	/**
 	 * The gateway accepted a queued row.
 	 *
-	 * @param int $post_id  The post.
-	 * @param int $revision The revision that was sent.
+	 * @param int    $post_id  The post.
+	 * @param int    $revision The revision that was sent.
+	 * @param string $sent_md5 The MD5 of the text that was sent.
 	 * @return bool False when the row moved on meanwhile (its webhook may have come first).
 	 */
-	public function mark_pending($post_id, $revision)
+	public function mark_pending($post_id, $revision, $sent_md5)
 	{
-		return $this->update(array('status' => self::PENDING, 'error_code' => ''), $post_id, $revision,
-			array(self::QUEUED), true);
+		return $this->update(array('status' => self::PENDING, 'error_code' => '', 'sent_md5' => (string) $sent_md5),
+			$post_id, $revision, array(self::QUEUED), true);
 	}
 
 	/**
@@ -223,11 +225,13 @@ class pending_store
 	 * @param int    $revision   The revision that was sent.
 	 * @param int    $retry_at   Unix seconds.
 	 * @param string $error_code Why, for the ACP (never content).
+	 * @param string $sent_md5   The MD5 of the text that was sent (the gateway may have taken it
+	 *     although no answer came back).
 	 * @return bool
 	 */
-	public function mark_retry($post_id, $revision, $retry_at, $error_code)
+	public function mark_retry($post_id, $revision, $retry_at, $error_code, $sent_md5)
 	{
-		return $this->update(array('retry_at' => (int) $retry_at, 'error_code' => self::code($error_code)),
+		return $this->update(array('retry_at' => (int) $retry_at, 'error_code' => self::code($error_code), 'sent_md5' => (string) $sent_md5),
 			$post_id, $revision, array(self::QUEUED), true);
 	}
 
@@ -310,12 +314,13 @@ class pending_store
 	}
 
 	/**
-	 * Starts the assessment again after the post was edited while it waited: a new revision,
-	 * queued now, with the previous outcome forgotten.
+	 * Starts the assessment again after the post was edited while it waited, or after a
+	 * time-out left it unassessed (held by fail-closed, published by fail-open): a new
+	 * revision, queued now, with the previous outcome and marks forgotten.
 	 *
 	 * @param int $post_id The post.
 	 * @param int $now     Unix seconds.
-	 * @return bool False when the row is not waiting.
+	 * @return bool False when the row is neither waiting nor timed out.
 	 */
 	public function restart($post_id, $now)
 	{
@@ -330,11 +335,37 @@ class pending_store
 				'retry_at'     => (int) $now,
 				'error_code'   => '',
 				'masked_text'  => '',
+				'sent_md5'     => '',
+				'approved_at'  => 0,
+				'approved_md5' => '',
 			)) . '
 			WHERE post_id = ' . (int) $post_id . '
-				AND ' . $this->db->sql_in_set('status', self::UNSETTLED);
+				AND ' . $this->reopenable();
 		$this->db->sql_query($sql);
 		return $this->db->sql_affectedrows() === 1;
+	}
+
+	/**
+	 * Whether a row still belongs to the assessment: waiting, or timed out.
+	 *
+	 * @return string The condition.
+	 */
+	public function reopenable()
+	{
+		return '(' . $this->db->sql_in_set('status', self::UNSETTLED) . ' OR ('
+			. $this->db->sql_in_set('status', array(self::PUBLISHED, self::HELD)) . " AND verdict = '" . self::VERDICT_TIMEOUT . "'))";
+	}
+
+	/**
+	 * Whether a row is waiting or timed out, as {@see reopenable} says in SQL.
+	 *
+	 * @param array<string,mixed> $row The row.
+	 * @return bool
+	 */
+	public static function is_reopenable(array $row)
+	{
+		return in_array($row['status'], self::UNSETTLED, true)
+			|| (in_array($row['status'], array(self::PUBLISHED, self::HELD), true) && $row['verdict'] === self::VERDICT_TIMEOUT);
 	}
 
 	/**
