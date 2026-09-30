@@ -93,3 +93,16 @@ services:
             - '@controller.helper'
             - '%core.root_path%'
             - '%core.php_ext%'
+
+    minos.moderation.cron.sweeper:
+        class: minos\moderation\cron\sweeper
+        arguments:
+            - '@config'
+            - '@minos.moderation.settings'
+            - '@minos.moderation.store'
+            - '@minos.moderation.submitter'
+            - '@minos.moderation.applier'
+        calls:
+            - [set_name, [cron.task.minos.moderation.sweeper]]
+        tags:
+            - { name: cron.task }
