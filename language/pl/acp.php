@@ -26,7 +26,7 @@ $lang = array_merge($lang, array(
 
 	'MINOS_SETTINGS'             => 'Ustawienia',
 	'MINOS_ENABLED'              => 'Oceniaj nowe posty',
-	'MINOS_ENABLED_EXPLAIN'      => 'Po wyłączeniu nowe posty publikują się jak dawniej. Posty, które już czekają na werdykt, zostaną obsłużone do końca.',
+	'MINOS_ENABLED_EXPLAIN'      => 'Wyłączone rozszerzenie nic nie robi: nowe posty publikują się jak dawniej, nic nie jest wysyłane do bramy, a werdykty są odrzucane (webhook odpowiada 404). Posty, które czekały na werdykt, zostają w kolejce do decyzji moderatora.',
 	'MINOS_GATEWAY_URL'          => 'Adres bramy',
 	'MINOS_GATEWAY_URL_EXPLAIN'  => 'Zwykle https://gateway.wergiliusz.app. Tylko https:// (http:// wyłącznie dla localhost, do testów z atrapą bramy).',
 	'MINOS_API_KEY'              => 'Klucz API',

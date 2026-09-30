@@ -24,8 +24,9 @@ use minos\moderation\service\verdict_applier;
  * 3. sends again the posts whose retry is due;
  * 4. forgets finished rows after 30 days.
  *
- * It runs even when the administrator switched the extension off, so that no post it held
- * stays in the queue for good.
+ * Switched off, the extension does nothing, and neither does the task: no time-outs, no
+ * retries. The posts it held wait in phpBB's queue for a moderator; switched on again, the
+ * task picks up where it stopped.
  */
 class sweeper extends \phpbb\cron\task\base
 {
@@ -70,6 +71,16 @@ class sweeper extends \phpbb\cron\task\base
 	}
 
 	/**
+	 * Whether the task may run at all: only while the extension is switched on.
+	 *
+	 * @return bool
+	 */
+	public function is_runnable()
+	{
+		return $this->settings->enabled();
+	}
+
+	/**
 	 * Whether the last run is at least {@see INTERVAL_S} old.
 	 *
 	 * @return bool
@@ -100,6 +111,10 @@ class sweeper extends \phpbb\cron\task\base
 	public function sweep($now)
 	{
 		$done = array('applied' => 0, 'timed_out' => 0, 'resubmitted' => 0, 'pruned' => 0);
+		if (!$this->settings->enabled())
+		{
+			return $done;
+		}
 
 		foreach ($this->store->received(self::BATCH) as $row)
 		{

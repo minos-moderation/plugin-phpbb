@@ -90,13 +90,38 @@ final class WebhookTest extends TestCase
 		self::assertSame(401, $this->board->receiver->receive($vector['body'], $vector['header'], (int) $vector['timestamp'] + 301)[0]);
 	}
 
-	public function testWithoutAStoredSecretEveryDeliveryIs401(): void
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function unusableSecrets(): array
+	{
+		return array('empty' => array(''), 'blank' => array('   '), 'short' => array('krotki'));
+	}
+
+	/**
+	 * @dataProvider unusableSecrets
+	 */
+	public function testWithoutAUsableStoredSecretEveryDeliveryIsRefused(string $secret): void
 	{
 		$id = $this->pending();
-		$this->board->configure(array(), array(settings::WEBHOOK_SECRET => ''));
+		$this->board->configure(array(), array(settings::WEBHOOK_SECRET => $secret));
 
-		self::assertSame(401, $this->board->deliver(self::verdict($id, 'bezpieczne'), array('secret' => '')));
+		// Signed with the very secret stored: an HMAC keyed with "" is one anybody can compute.
+		self::assertSame(401, $this->board->deliver(self::verdict($id, 'bezpieczne'), array('secret' => $secret)));
 		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->visibility->calls);
+	}
+
+	public function testSwitchedOffTheWebhookAnswers404AndRecordsNothing(): void
+	{
+		$id = $this->pending();
+		$this->board->configure(array(settings::ENABLED => 0));
+
+		self::assertSame(404, $this->board->deliver(self::verdict($id, 'bezpieczne')));
+
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the post waits for a moderator');
+		self::assertSame(array(), $this->board->visibility->calls);
 	}
 
 	public function testASignedBodyThatIsNotAPayloadIs400(): void

@@ -98,17 +98,25 @@ final class SweeperTest extends TestCase
 		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
 	}
 
-	public function testRetriesWaitWhileTheExtensionIsOffButTheTimeoutStillApplies(): void
+	public function testSwitchedOffTheTaskIsIdleAndHeldPostsWaitForAModerator(): void
 	{
 		$this->gateway->refuse(503, 'kolejka_niedostepna');
-		$id = $this->board->posting('Zwykły testowy wpis.')['post_id'];
-		$this->board->configure(array(settings::ENABLED => 0, settings::FAIL_MODE => settings::FAIL_CLOSED));
+		$retrying = $this->board->posting('Pierwszy testowy wpis.')['post_id'];
+		$waiting = $this->board->posting('Drugi testowy wpis.')['post_id'];
+		$this->board->configure(array(settings::ENABLED => 0, settings::FAIL_MODE => settings::FAIL_OPEN));
+		$sweeper = $this->board->sweeper();
 
-		$this->board->sweeper()->sweep(time() + 61);
-		self::assertCount(1, $this->gateway->requests);
+		self::assertFalse($sweeper->is_runnable());
+		$sweeper->sweep(time() + 30 * 86400);
 
-		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
-		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		self::assertCount(2, $this->gateway->requests, 'no retry');
+		self::assertSame(pending_store::QUEUED, $this->board->row($retrying)['status']);
+		self::assertSame(pending_store::PENDING, $this->board->row($waiting)['status'], 'no time-out, even fail-open');
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($waiting)['post_visibility']);
+		self::assertSame(array(), $this->board->visibility->calls);
+
+		$this->board->configure(array(settings::ENABLED => 1));
+		self::assertTrue($this->board->sweeper()->is_runnable(), 'switched on again, it picks up');
 	}
 
 	public function testFinishedRowsAreForgottenAfterThirtyDaysAndWaitingOnesAreNot(): void

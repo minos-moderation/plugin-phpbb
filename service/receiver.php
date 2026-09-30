@@ -17,9 +17,12 @@ use Minos\Client\WebhookPayload;
 /**
  * The webhook's logic, in the order of the contract's receiving checklist:
  *
+ * 0. with the extension switched off, `404`: it does nothing, and the gateway retries until
+ *    its TTL while the held posts wait in phpBB's queue for a moderator;
  * 1. the raw body, as it arrived;
  * 2. the signature (`Signature::verify` of the bundled client): `401` when it fails, so the
- *    gateway retries;
+ *    gateway retries. Without a usable stored secret every delivery is refused: an HMAC keyed
+ *    with an empty string is one anybody can compute;
  * 3. the payload (`WebhookPayload::parse`): `400` when it is not one; an id this forum does not
  *    wait for (unknown, of an earlier revision, or already handled) gets `200` and nothing
  *    else, because deliveries repeat;
@@ -58,8 +61,12 @@ class receiver
 	 */
 	public function receive($body, $signature, $now)
 	{
+		if (!$this->settings->enabled())
+		{
+			return array(404, null);
+		}
 		$secret = $this->settings->webhook_secret();
-		if ($secret === '' || !Signature::verify($secret, (string) $signature, (string) $body, (int) $now))
+		if (!settings::valid_secret($secret) || !Signature::verify($secret, (string) $signature, (string) $body, (int) $now))
 		{
 			return array(401, null);
 		}

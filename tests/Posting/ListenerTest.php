@@ -149,6 +149,18 @@ final class ListenerTest extends TestCase
 		self::assertSame('Druga wersja wpisu.', $item['tekst']);
 	}
 
+	public function testSwitchedOffAnEditOfAWaitingPostIsNotSent(): void
+	{
+		$id = $this->board->posting('Pierwsza wersja wpisu.')['post_id'];
+		$this->board->configure(array(settings::ENABLED => 0));
+
+		$this->board->edit($id, 'Druga wersja wpisu.');
+
+		self::assertCount(1, $this->gateway->requests);
+		self::assertSame('0', $this->board->row($id)['revision']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'it stays in phpBB\'s queue');
+	}
+
 	public function testAnEditOfAPublishedPostIsLeftToPhpbb(): void
 	{
 		$id = $this->board->posting('Pierwsza wersja wpisu.')['post_id'];

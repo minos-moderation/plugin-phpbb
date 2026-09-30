@@ -27,7 +27,8 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
  * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
  * posts without text to assess (only a quote, an image); and everything while the
- * extension is off or not configured.
+ * extension is off or not configured. Switched off, the extension does nothing at all: an
+ * edit of a post it held is not sent either, and the post waits for a moderator.
  *
  * MCP: the approval queue marks the posts the extension holds, and a post's details show
  * the outcome, including the gateway's call for support (`wsparcie`).
@@ -101,6 +102,10 @@ class listener implements EventSubscriberInterface
 	 */
 	public function hold_for_assessment($event)
 	{
+		if (!$this->settings->enabled())
+		{
+			return;
+		}
 		$mode = (string) $event['mode'];
 		$data = $event['data'];
 		$forum_id = (int) $event['forum_id'];
@@ -139,7 +144,7 @@ class listener implements EventSubscriberInterface
 		$data = $event['data'];
 		$flag = isset($data[self::FLAG]) ? $data[self::FLAG] : null;
 		$post_id = isset($data['post_id']) ? (int) $data['post_id'] : 0;
-		if ($flag === null || $post_id <= 0 || (int) $event['post_visibility'] !== ITEM_UNAPPROVED)
+		if ($flag === null || $post_id <= 0 || (int) $event['post_visibility'] !== ITEM_UNAPPROVED || !$this->settings->enabled())
 		{
 			return;
 		}

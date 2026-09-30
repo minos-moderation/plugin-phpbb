@@ -60,7 +60,8 @@ class webhook
 	/**
 	 * Handles one delivery.
 	 *
-	 * @return Response `200`, `400` or `401`, with an empty body (the gateway discards it).
+	 * @return Response `200`, `400`, `401` or `404` (switched off), with an empty body (the
+	 *     gateway discards it).
 	 */
 	public function handle()
 	{
