@@ -234,6 +234,10 @@ class pending_store
 	/**
 	 * Records the outcome of an assessment, once.
 	 *
+	 * A row that timed out (published by the fail-open mode, or held by the fail-closed one)
+	 * still takes a verdict that arrives late, since the gateway may have accepted the post
+	 * later than it was queued here.
+	 *
 	 * @param int                $post_id    The post.
 	 * @param int                $revision   The revision the outcome is for.
 	 * @param string             $verdict    `bezpieczne`, `ocenzurowane`, `zablokowane`,
@@ -261,7 +265,7 @@ class pending_store
 			'support'     => $support ? 1 : 0,
 			'masked_text' => is_string($masked) ? $masked : '',
 			'error_code'  => self::code($error_code),
-		), $post_id, $revision, self::OPEN, false);
+		), $post_id, $revision, self::OPEN, false, array(self::PUBLISHED, self::HELD));
 	}
 
 	/**
@@ -273,7 +277,9 @@ class pending_store
 	 * @param string $original_text The post's stored text before it was replaced, or ''.
 	 * @param int    $now           Unix seconds.
 	 * @param array<string,int|string> $extra Other columns: `truncated` (the gateway saw only
-	 *     the first 3000 characters), `error_code`.
+	 *     the first 3000 characters), `error_code`, and the mark of the extension's own
+	 *     fail-open approval: `approved_at` (its time, 0 for none) and `approved_md5` (the
+	 *     stored text it approved).
 	 * @return bool False when the row is not `received` (someone else applied it).
 	 */
 	public function finish($post_id, $revision, $status, $original_text, $now, array $extra = array())
@@ -282,7 +288,7 @@ class pending_store
 		{
 			$extra['error_code'] = self::code($extra['error_code']);
 		}
-		return $this->update(array_intersect_key($extra, array_flip(array('truncated', 'error_code'))) + array(
+		return $this->update(array_intersect_key($extra, array_flip(array('truncated', 'error_code', 'approved_at', 'approved_md5'))) + array(
 			'status'        => $status,
 			'original_text' => (string) $original_text,
 			'handled_at'    => (int) $now,
@@ -353,15 +359,21 @@ class pending_store
 	 * @param int                 $revision      The revision the change is for.
 	 * @param array<int,string>   $from          Statuses the row must be in.
 	 * @param bool                $count_attempt Whether this was a submission attempt.
+	 * @param array<int,string>   $timed_out     Statuses a timed-out row may also be in.
 	 * @return bool Whether the row changed.
 	 */
-	protected function update(array $values, $post_id, $revision, array $from, $count_attempt)
+	protected function update(array $values, $post_id, $revision, array $from, $count_attempt, array $timed_out = array())
 	{
+		$status = $this->db->sql_in_set('status', $from);
+		if ($timed_out)
+		{
+			$status = '(' . $status . ' OR (' . $this->db->sql_in_set('status', $timed_out) . " AND verdict = '" . self::VERDICT_TIMEOUT . "'))";
+		}
 		$sql = 'UPDATE ' . $this->table . '
 			SET ' . ($count_attempt ? 'attempts = attempts + 1, ' : '') . $this->db->sql_build_array('UPDATE', $values) . '
 			WHERE post_id = ' . (int) $post_id . '
 				AND revision = ' . (int) $revision . '
-				AND ' . $this->db->sql_in_set('status', $from);
+				AND ' . $status;
 		$this->db->sql_query($sql);
 		return $this->db->sql_affectedrows() === 1;
 	}

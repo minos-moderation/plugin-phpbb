@@ -71,7 +71,7 @@ final class LanguageTest extends TestCase
 		self::assertGreaterThan(60, count($used), 'the scan finds the keys');
 
 		// Keys built at run time: every value they can take.
-		foreach (array('QUEUED', 'PENDING', 'RECEIVED', 'PUBLISHED', 'MASKED', 'HELD', 'DELETED', 'SUPERSEDED') as $status)
+		foreach (array('QUEUED', 'PENDING', 'RECEIVED', 'PUBLISHED', 'PUBLISHED_FAIL_OPEN', 'MASKED', 'HELD', 'DELETED', 'SUPERSEDED') as $status)
 		{
 			$used['MINOS_STATUS_' . $status] = 'controller/acp.php';
 		}

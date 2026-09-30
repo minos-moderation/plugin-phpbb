@@ -51,6 +51,8 @@ class install_schema extends \phpbb\db\migration\migration
 						'submitted_at'  => array('TIMESTAMP', 0),
 						'retry_at'      => array('TIMESTAMP', 0),
 						'handled_at'    => array('TIMESTAMP', 0),
+						'approved_at'   => array('TIMESTAMP', 0),
+						'approved_md5'  => array('VCHAR:32', ''),
 						'error_code'    => array('VCHAR:40', ''),
 						'masked_text'   => array('MTEXT_UNI', ''),
 						'original_text' => array('MTEXT_UNI', ''),

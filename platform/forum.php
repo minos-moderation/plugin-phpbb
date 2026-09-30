@@ -263,11 +263,12 @@ class forum
 	 * side the post simply appears).
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @param int                 $time The moment, stored by phpBB with the change.
 	 * @return void
 	 */
-	public function approve(array $post)
+	public function approve(array $post, $time)
 	{
-		$this->set_visibility(ITEM_APPROVED, $post, '');
+		$this->set_visibility(ITEM_APPROVED, $post, '', $time);
 
 		if (!(int) $post['topic_posts_approved'])
 		{
@@ -286,24 +287,62 @@ class forum
 	}
 
 	/**
-	 * Soft-deletes a post held in the queue.
+	 * Soft-deletes a post.
 	 *
 	 * phpBB's `content_visibility` accounts only an approved → deleted change: applied to an
-	 * unapproved post, it would lower post counts that were never raised. The post is
-	 * therefore approved and then deleted, without any notification; the caller runs both in
-	 * one transaction, so no reader sees it approved.
+	 * unapproved post, it would lower post counts that were never raised. A post held in the
+	 * queue is therefore approved and then deleted, without any notification; the caller runs
+	 * both in one transaction, so no reader sees it approved.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @param int                 $time The moment, stored by phpBB with the change.
 	 * @return void
 	 */
-	public function soft_delete(array $post)
+	public function soft_delete(array $post, $time)
 	{
 		$this->language->add_lang('common', 'minos/moderation');
-		$this->set_visibility(ITEM_APPROVED, $post, '');
-		$this->set_visibility(ITEM_DELETED, $post, $this->language->lang('MINOS_DELETE_REASON'));
+		if ($this->awaits_approval($post))
+		{
+			$this->set_visibility(ITEM_APPROVED, $post, '', $time);
+		}
+		$this->set_visibility(ITEM_DELETED, $post, $this->language->lang('MINOS_DELETE_REASON'), $time);
 
 		$this->notifications->delete_notifications('notification.type.topic_in_queue', (int) $post['topic_id']);
 		$this->notifications->delete_notifications('notification.type.post_in_queue', (int) $post['post_id']);
+	}
+
+	/**
+	 * Puts a published post back into the approval queue (phpBB's "re-approve" state, which
+	 * the MCP queue lists), and tells the moderators as phpBB does for an edited post.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @param int                 $time The moment, stored by phpBB with the change.
+	 * @return void
+	 */
+	public function return_to_queue(array $post, $time)
+	{
+		$this->set_visibility(ITEM_REAPPROVE, $post, '', $time);
+		$first = (int) $post['post_id'] <= (int) $post['topic_first_post_id'];
+		$this->notifications->add_notifications($first ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue', $post);
+	}
+
+	/**
+	 * Whether a post the extension approved by its failure mode is still exactly as it left
+	 * it: approved by the extension at that moment (phpBB records who changed a post's
+	 * visibility and when, so a moderator's deletion, restoration or approval shows), with the
+	 * text it approved (an edit shows).
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @param int                 $time The moment of the extension's approval.
+	 * @param string              $md5  The MD5 of the stored text it approved.
+	 * @return bool
+	 */
+	public function untouched_since_approval(array $post, $time, $md5)
+	{
+		return (int) $post['post_visibility'] === ITEM_APPROVED
+			&& (int) $post['post_delete_user'] === ANONYMOUS
+			&& (int) $post['post_delete_time'] === (int) $time
+			&& hash_equals((string) $md5, md5((string) $post['post_text']));
 	}
 
 	/**
@@ -384,17 +423,18 @@ class forum
 	/**
 	 * Changes one post's visibility with the first/last-post flags the MCP would compute.
 	 *
-	 * @param int                 $visibility ITEM_APPROVED or ITEM_DELETED.
+	 * @param int                 $visibility ITEM_APPROVED, ITEM_DELETED or ITEM_REAPPROVE.
 	 * @param array<string,mixed> $post       A row from {@see load_post}.
 	 * @param string              $reason     The reason stored with a deletion.
+	 * @param int                 $time       The moment.
 	 * @return void
 	 */
-	protected function set_visibility($visibility, array $post, $reason)
+	protected function set_visibility($visibility, array $post, $reason, $time)
 	{
 		$post_id = (int) $post['post_id'];
 		$is_starter = $post_id <= (int) $post['topic_first_post_id'] || (int) $post['post_time'] <= (int) $post['topic_time'];
 		$is_latest = $post_id >= (int) $post['topic_last_post_id'] || (int) $post['post_time'] >= (int) $post['topic_last_post_time'];
 		$this->visibility->set_post_visibility($visibility, array($post_id), (int) $post['topic_id'], (int) $post['forum_id'],
-			ANONYMOUS, time(), $reason, $is_starter, $is_latest);
+			ANONYMOUS, (int) $time, $reason, $is_starter, $is_latest);
 	}
 }

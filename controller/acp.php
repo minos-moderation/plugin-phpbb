@@ -164,7 +164,8 @@ class acp
 				'POST_ID'    => $post_id,
 				'U_POST'     => append_sid($this->root_path . 'viewtopic.' . $this->php_ext, 'p=' . $post_id) . '#p' . $post_id,
 				'U_MCP'      => append_sid($this->root_path . 'mcp.' . $this->php_ext, 'i=queue&amp;mode=approve_details&amp;p=' . $post_id),
-				'STATUS'     => self::escape($this->language->lang('MINOS_STATUS_' . strtoupper((string) $row['status']))),
+				'STATUS'     => self::escape($this->language->lang(($row['status'] === pending_store::PUBLISHED && (int) $row['approved_at'] > 0)
+					? 'MINOS_STATUS_PUBLISHED_FAIL_OPEN' : 'MINOS_STATUS_' . strtoupper((string) $row['status']))),
 				'VERDICT'    => self::escape((string) $row['verdict']),
 				'CATEGORIES' => self::escape(str_replace(',', ', ', (string) $row['categories'])),
 				'ERROR_CODE' => self::escape((string) $row['error_code']),

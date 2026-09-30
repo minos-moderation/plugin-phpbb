@@ -21,6 +21,9 @@ if (empty($lang) || !is_array($lang))
 // The LOG_ keys are also in info_acp_moderation.php: the ACP and the MCP each load only their own file.
 $lang = array_merge($lang, array(
 	'LOG_MINOS_POST_PUBLISHED' => '<strong>Minos opublikował post</strong><br />» %s',
+	'LOG_MINOS_POST_PUBLISHED_FAIL_OPEN' => '<strong>Minos opublikował post bez oceny (tryb awarii fail-open)</strong><br />» %s',
+	'LOG_MINOS_POST_CONFIRMED' => '<strong>Minos potwierdził post opublikowany wcześniej bez oceny</strong><br />» %s',
+	'LOG_MINOS_POST_RETURNED'  => '<strong>Minos cofnął do kolejki post opublikowany wcześniej bez oceny</strong><br />» %s',
 	'LOG_MINOS_POST_MASKED'    => '<strong>Minos opublikował post z zamaskowanymi fragmentami</strong><br />» %s',
 	'LOG_MINOS_POST_HELD'      => '<strong>Minos zostawił post w kolejce do zatwierdzenia</strong><br />» %s',
 	'LOG_MINOS_POST_DELETED'   => '<strong>Minos usunął post (miękko)</strong><br />» %s',

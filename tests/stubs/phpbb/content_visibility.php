@@ -51,10 +51,18 @@ class content_visibility
 			'topic_id'   => (int) $topic_id,
 			'forum_id'   => (int) $forum_id,
 			'reason'     => (string) $reason,
+			'user_id'    => (int) $user_id,
+			'time'       => (int) $time,
 			'is_starter' => (bool) $is_starter,
 			'is_latest'  => (bool) $is_latest,
 		);
-		$this->db->sql_query('UPDATE ' . $this->posts_table . ' SET post_visibility = ' . (int) $visibility . ", post_delete_reason = '" . $this->db->sql_escape((string) $reason) . "' WHERE " . $this->db->sql_in_set('post_id', $ids));
+		// phpBB stores who changed the visibility and when, for every change.
+		$this->db->sql_query('UPDATE ' . $this->posts_table . ' SET ' . $this->db->sql_build_array('UPDATE', array(
+			'post_visibility'    => (int) $visibility,
+			'post_delete_user'   => (int) $user_id,
+			'post_delete_time'   => ((int) $time) ?: time(),
+			'post_delete_reason' => (string) $reason,
+		)) . ' WHERE ' . $this->db->sql_in_set('post_id', $ids));
 		return array('post_visibility' => $visibility);
 	}
 }

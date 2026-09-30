@@ -47,8 +47,8 @@ class settings
 	/** Minutes to wait for a verdict: the gateway's 15-minute TTL plus grace. */
 	const DEFAULT_TIMEOUT_MIN = 20;
 
-	/** Below the gateway's TTL a verdict could still be on its way. */
-	const MIN_TIMEOUT_MIN = 16;
+	/** The gateway's 15-minute TTL and its last delivery attempts, with room to spare. */
+	const MIN_TIMEOUT_MIN = 20;
 
 	/** One day. */
 	const MAX_TIMEOUT_MIN = 1440;

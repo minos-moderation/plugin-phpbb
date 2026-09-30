@@ -100,6 +100,15 @@ final class ExtensionTest extends TestCase
 		self::assertSame('forum_adult', $settings->profile());
 	}
 
+	public function testTheTimeoutIsNeverUnderTwentyMinutes(): void
+	{
+		foreach (array(0 => 20, 5 => 20, 16 => 20, 19 => 20, 20 => 20, 45 => 45, 5000 => 1440) as $stored => $minutes)
+		{
+			$settings = new settings(new \phpbb\config\config(array(settings::TIMEOUT_MIN => $stored)), new \phpbb\config\db_text());
+			self::assertSame($minutes * 60, $settings->timeout_seconds(), "stored {$stored}");
+		}
+	}
+
 	/**
 	 * The phpBB 3.3 services the extension uses (`config/default/container/*.yml`), with the
 	 * class or interface each one is.

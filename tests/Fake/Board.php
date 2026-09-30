@@ -403,7 +403,8 @@ class Board
 			forum_id INTEGER NOT NULL DEFAULT 0, poster_id INTEGER NOT NULL DEFAULT 0, poster_ip TEXT NOT NULL DEFAULT '',
 			post_time INTEGER NOT NULL DEFAULT 0, post_visibility INTEGER NOT NULL DEFAULT 0, post_subject TEXT NOT NULL DEFAULT '',
 			post_text TEXT NOT NULL DEFAULT '', post_username TEXT NOT NULL DEFAULT '', post_checksum TEXT NOT NULL DEFAULT '',
-			bbcode_uid TEXT NOT NULL DEFAULT '', bbcode_bitfield TEXT NOT NULL DEFAULT '', post_delete_reason TEXT NOT NULL DEFAULT '')");
+			bbcode_uid TEXT NOT NULL DEFAULT '', bbcode_bitfield TEXT NOT NULL DEFAULT '', post_delete_reason TEXT NOT NULL DEFAULT '',
+			post_delete_user INTEGER NOT NULL DEFAULT 0, post_delete_time INTEGER NOT NULL DEFAULT 0)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}forums (forum_id, forum_name) VALUES (2, 'Ogólne'), (3, 'Dla młodzieży')");
 		$this->db->pdo->exec("INSERT INTO {$prefix}users (user_id, username, user_email, user_ip, user_posts) VALUES
 			(1, 'Anonymous', '', '', 0), (2, 'Autorka', '" . self::USER_EMAIL . "', '" . self::USER_IP . "', 5), (3, 'Nowy', 'nowy@forum.example', '198.51.100.99', 0)");

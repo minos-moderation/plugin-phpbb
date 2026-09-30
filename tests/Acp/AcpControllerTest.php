@@ -102,6 +102,7 @@ final class AcpControllerTest extends TestCase
 			'an unknown profile'          => array(array('minos_profile' => 'demo_dziecko'), 'MINOS_ERROR_CHOICE'),
 			'an unknown failure mode'     => array(array('minos_fail_mode' => 'fail-maybe'), 'MINOS_ERROR_CHOICE'),
 			'a timeout below the TTL'     => array(array('minos_timeout_min' => '10'), 'MINOS_ERROR_TIMEOUT'),
+			'a timeout under 20 minutes'  => array(array('minos_timeout_min' => '19'), 'MINOS_ERROR_TIMEOUT'),
 		);
 	}
 
@@ -184,6 +185,17 @@ final class AcpControllerTest extends TestCase
 		self::assertTrue($row['S_HELD']);
 		self::assertSame('zablokowane', $row['VERDICT']);
 		self::assertStringContainsString('mode=approve_details', $row['U_MCP']);
+	}
+
+	public function testAFailOpenApprovalIsShownAsSuch(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));
+		$this->board->posting('Zwykły testowy wpis.');
+		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
+
+		$this->show(new FormRequest());
+
+		self::assertSame('Opublikowany bez oceny (fail-open)', $this->template->blocks['minos_rows'][0]['STATUS']);
 	}
 
 	/**

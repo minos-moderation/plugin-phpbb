@@ -24,11 +24,23 @@ use minos\moderation\platform\forum;
  * A post longer than 3000 characters was assessed on its beginning only: a block still
  * blocks, but nothing publishes it on the gateway's word. `bezpieczne` reads as
  * `nieocenione` (the failure mode), and `ocenzurowane` always holds.
+ *
+ * A post the failure mode published is marked (`approved_at`, `approved_md5`). A verdict
+ * that arrives for it later is applied to the published post - `zablokowane` takes it back
+ * to the queue or deletes it, `ocenzurowane` masks it or takes it back, `bezpieczne`
+ * confirms it - unless someone changed the post since: a moderator's decision, or an edit,
+ * stands.
  */
 class verdict_applier
 {
-	/** Publish the post as written. */
+	/** Publish the post as written, on the gateway's verdict. */
 	const PUBLISH = 'publish';
+
+	/** Publish the post as written, without a verdict: the fail-open mode. */
+	const PUBLISH_UNASSESSED = 'publish_unassessed';
+
+	/** Leave a post the failure mode published as it is (a late outcome that is no verdict). */
+	const KEEP = 'keep';
 
 	/** Publish the gateway's masked text in place of the post's text. */
 	const PUBLISH_MASKED = 'publish_masked';
@@ -100,7 +112,20 @@ class verdict_applier
 		}
 		// `nieocenione`, a timeout, a refusal, anything unknown, or `bezpieczne` about the
 		// beginning of a longer text: not a verdict on the post.
-		return ($fail_mode === settings::FAIL_OPEN) ? self::PUBLISH : self::HOLD;
+		return ($fail_mode === settings::FAIL_OPEN) ? self::PUBLISH_UNASSESSED : self::HOLD;
+	}
+
+	/**
+	 * Whether an outcome is a verdict on the whole post, one that may change a post the
+	 * failure mode published.
+	 *
+	 * @param string $verdict  The recorded outcome.
+	 * @param bool   $complete Whether the gateway saw the whole text.
+	 * @return bool
+	 */
+	public static function is_verdict($verdict, $complete)
+	{
+		return $verdict === 'zablokowane' || $verdict === 'ocenzurowane' || ($verdict === 'bezpieczne' && $complete);
 	}
 
 	/**
@@ -141,25 +166,36 @@ class verdict_applier
 			return null;
 		}
 		$revision = (int) $row['revision'];
+		$approved_at = (int) $row['approved_at'];
+		$late = ($approved_at > 0);
 
 		$this->db->sql_transaction('begin');
 		try
 		{
 			$post = $this->forum->load_post($post_id);
-			if ($post === null || !$this->forum->awaits_approval($post))
+			if ($post === null
+				|| ($late && !$this->forum->untouched_since_approval($post, $approved_at, (string) $row['approved_md5']))
+				|| (!$late && !$this->forum->awaits_approval($post)))
 			{
-				$status = $this->store->finish($post_id, $revision, pending_store::SUPERSEDED, '', $now) ? pending_store::SUPERSEDED : null;
+				// Gone, or dealt with by someone else: that decision stands.
+				$status = $this->store->finish($post_id, $revision, pending_store::SUPERSEDED, '', $now, array('approved_at' => 0, 'approved_md5' => ''))
+					? pending_store::SUPERSEDED : null;
 				$this->db->sql_transaction('commit');
 				return $status;
 			}
 
+			$verdict = (string) $row['verdict'];
 			$masked = ($row['masked_text'] !== '') ? (string) $row['masked_text'] : null;
 			$complete = !forum::is_cut($this->forum->plain_text((string) $post['post_text']));
-			$action = self::decide((string) $row['verdict'], $masked, $complete,
+			$action = self::decide($verdict, $masked, $complete,
 				$this->settings->censored_mode(), $this->settings->blocked_mode(), $this->settings->fail_mode());
+			if ($late && !self::is_verdict($verdict, $complete))
+			{
+				$action = self::KEEP;
+			}
 
 			$original = '';
-			$extra = array('truncated' => $complete ? 0 : 1);
+			$extra = array('truncated' => $complete ? 0 : 1, 'approved_at' => 0, 'approved_md5' => '');
 			if ($action === self::PUBLISH_MASKED && $mask_failed)
 			{
 				$action = self::HOLD;
@@ -169,7 +205,21 @@ class verdict_applier
 			{
 				case self::PUBLISH:
 					$status = pending_store::PUBLISHED;
-					$log = 'LOG_MINOS_POST_PUBLISHED';
+					$log = $late ? 'LOG_MINOS_POST_CONFIRMED' : 'LOG_MINOS_POST_PUBLISHED';
+				break;
+
+				case self::PUBLISH_UNASSESSED:
+					$status = pending_store::PUBLISHED;
+					$log = 'LOG_MINOS_POST_PUBLISHED_FAIL_OPEN';
+					$extra['approved_at'] = (int) $now;
+					$extra['approved_md5'] = md5((string) $post['post_text']);
+				break;
+
+				case self::KEEP:
+					$status = pending_store::PUBLISHED;
+					$log = null;
+					$extra['approved_at'] = $approved_at;
+					$extra['approved_md5'] = (string) $row['approved_md5'];
 				break;
 
 				case self::PUBLISH_MASKED:
@@ -185,7 +235,7 @@ class verdict_applier
 
 				default:
 					$status = pending_store::HELD;
-					$log = 'LOG_MINOS_POST_HELD';
+					$log = $late ? 'LOG_MINOS_POST_RETURNED' : 'LOG_MINOS_POST_HELD';
 				break;
 			}
 
@@ -196,25 +246,44 @@ class verdict_applier
 				return null;
 			}
 
-			if ($action === self::PUBLISH)
+			switch ($action)
 			{
-				$this->forum->approve($post);
+				case self::PUBLISH:
+				case self::PUBLISH_UNASSESSED:
+					if (!$late)
+					{
+						$this->forum->approve($post, $now);
+					}
+				break;
+
+				case self::PUBLISH_MASKED:
+					$masked_post = $this->forum->replace_text($post, (string) $masked);
+					if ($masked_post === null)
+					{
+						$this->db->sql_transaction('rollback');
+						return self::MASK_FAILED;
+					}
+					if (!$late)
+					{
+						$this->forum->approve($masked_post, $now);
+					}
+				break;
+
+				case self::DELETE:
+					$this->forum->soft_delete($post, $now);
+				break;
+
+				case self::HOLD:
+					if ($late)
+					{
+						$this->forum->return_to_queue($post, $now);
+					}
+				break;
 			}
-			else if ($action === self::PUBLISH_MASKED)
+			if ($log !== null)
 			{
-				$masked_post = $this->forum->replace_text($post, (string) $masked);
-				if ($masked_post === null)
-				{
-					$this->db->sql_transaction('rollback');
-					return self::MASK_FAILED;
-				}
-				$this->forum->approve($masked_post);
+				$this->forum->log_decision($post, $log);
 			}
-			else if ($action === self::DELETE)
-			{
-				$this->forum->soft_delete($post);
-			}
-			$this->forum->log_decision($post, $log);
 			if (!empty($row['support']))
 			{
 				// `wsparcie`: a cue to reach out, whatever happened to the post; the moderator log
