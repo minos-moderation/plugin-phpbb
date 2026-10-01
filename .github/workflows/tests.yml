@@ -40,3 +40,27 @@ jobs:
           grep -q ' minos/moderation/ext.php$' build/contents.txt
           grep -q ' minos/moderation/vendor/minos-moderation/client-php/src/Signature.php$' build/contents.txt
           ! grep -Eq 'composer\.lock|/tests/|mock-gateway|vendor/.*composer\.json' build/contents.txt
+
+  # The release workflow's build and checks on every pull request, against the version the
+  # repository declares, so a broken build or check shows before tag time.
+  release-archive:
+    name: Release package (build and check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # 2.37.2
+        with:
+          php-version: '7.4'
+          extensions: curl, json, mbstring, zip
+          coverage: none
+      - name: Build it and prove it as the release of the declared version
+        shell: bash
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
+        run: |
+          version="$(php -r "echo json_decode(file_get_contents('composer.json'), true)['version'];")"
+          archive="$(bash bin/build-zip.sh | tail -n 1)"
+          bash .github/scripts/check-release-archive.sh "$archive" "v$version"
