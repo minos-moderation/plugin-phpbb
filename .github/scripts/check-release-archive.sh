@@ -57,14 +57,19 @@ absent 'a .git* entry' '(^|/)\.git[^/]*(/|$)'
 absent 'a CLAUDE.md' '(^|/)CLAUDE\.md$'
 absent 'a .claude/ directory' '(^|/)\.claude(/|$)'
 absent 'a .github/ directory' '(^|/)\.github(/|$)'
+absent "Composer's installed.json (the exact dependency pins)" '(^|/)installed\.json$'
 
+# The licence must be there AND say something: an empty or blank file is no licence.
 if ! grep -F -x -q -- "$licence" <<<"$listing"; then
   fail "the licence $licence is not in the archive"
+elif [ "$(unzip -p "$archive" "$licence" | tr -d '[:space:]' | wc -c)" -eq 0 ]; then
+  fail "the licence $licence in the archive is empty"
 fi
 
 # The version as phpBB reads it: the "version" key of the shipped composer.json.
 version=''
 if grep -F -x -q -- "$version_file" <<<"$listing"; then
+  # shellcheck disable=SC2016  # PHP code: its $variables are PHP's, not the shell's.
   version="$(unzip -p "$archive" "$version_file" | php -r '
     $meta = json_decode((string) stream_get_contents(STDIN), true);
     if (is_array($meta) && isset($meta["version"]) && is_string($meta["version"])) {
