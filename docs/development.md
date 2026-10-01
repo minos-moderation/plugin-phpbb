@@ -27,6 +27,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `migrations/` | The table; the settings and the ACP module. |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
+| `.github/workflows/release.yml` | On a `v*` tag: builds the package, proves it with `.github/scripts/check-release-archive.sh` and attaches it to the GitHub Release. |
 
 ## The life of a post
 
@@ -151,6 +152,38 @@ packages; `bin/package.php` packs what phpBB loads and the client's `src/*.php` 
 `LICENSE` only - no `composer.lock`, no dependency manifest, no tests, no mock. The
 extension's own `composer.json` ships, reduced to its metadata, because phpBB's
 `metadata_manager` refuses an extension without it.
+
+## Releasing
+
+The version lives in ONE place the release workflow checks: `"version"` in `composer.json` (it ships in the package, and phpBB's extension manager shows it; `ext.php` declares none). The repository
+keeps no changelog; the release notes are GitHub's generated ones. The workflow, not a
+person, creates the release, and only after its checks pass.
+
+1. Set `"version"` in `composer.json` to the release (`0.1.0-dev` → `0.1.0`) in a pull request, and merge it. On every pull request the `release-archive` job
+   of `tests.yml` already runs the release build and checks against the declared version.
+2. The dry run on `main`: Actions → Release → "Run workflow", branch `main`, the tag to
+   be (`v0.1.0`). It builds and checks exactly as a tag push does and keeps the zip
+   as the run's `release-archive` artifact (7 days); see it green.
+3. The owner creates and pushes the TAG ONLY, on the commit the dry run checked, from a
+   local clone: `git tag -a v0.1.0 -m v0.1.0 <commit>` and `git push origin v0.1.0`.
+   Not GitHub's "Draft a new release" form: a tag created there is published together
+   with its release, before any check. Tag pushes from Claude Code sessions are refused.
+4. The tag's push starts `.github/workflows/release.yml`, which builds `build/minos-moderation-<version>.zip` with `bin/build-zip.sh` on PHP 7.4 and lists it,
+   failing on any hit: `composer.lock`, `tests/`, `phpunit*`, the mock gateway, `.git*`, `CLAUDE.md`, `.claude/`, `.github/`, Composer's `installed.json`; it also fails unless `minos/moderation/LICENSE` is inside and not
+   blank, and the shipped `composer.json`'s `"version"` equals the tag without the `v` (the message names both). Only
+   then the `publish` job creates the release with the zip attached (`--verify-tag`,
+   generated notes, a pre-release for a tag with `-`). gh creates it as a draft, uploads,
+   then publishes, so a failed upload leaves a draft, never a release without its asset.
+
+When a release for the tag already exists at that point, `publish` fails and attaches
+nothing: such a release was published unchecked. Delete it (keep the tag) and re-run the
+failed jobs. Nothing replaces an asset (`--clobber` is never used), so a second upload
+fails loudly. A failed check publishes nothing: delete the tag, fix `main`, start again
+from step 1. By hand: `bash bin/build-zip.sh`, then `.github/scripts/check-release-archive.sh build/minos-moderation-0.1.0.zip v0.1.0`.
+
+Nothing in this repository enforces that only the owner tags (the session refusal lives
+outside GitHub): the owner should add a tag ruleset on `v*` that only they may bypass, or
+a `release` environment with a required reviewer on the `publish` job.
 
 ## phpBB APIs
 
