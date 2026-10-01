@@ -27,6 +27,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `migrations/` | The table; the settings and the ACP module. |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
+| `.github/workflows/release.yml` | On a `v*` tag: builds the package, proves it with `.github/scripts/check-release-archive.sh` and attaches it to the GitHub Release. |
 
 ## The life of a post
 
@@ -151,6 +152,38 @@ packages; `bin/package.php` packs what phpBB loads and the client's `src/*.php` 
 `LICENSE` only - no `composer.lock`, no dependency manifest, no tests, no mock. The
 extension's own `composer.json` ships, reduced to its metadata, because phpBB's
 `metadata_manager` refuses an extension without it.
+
+## Releasing
+
+The version lives in ONE place the release workflow checks: `"version"` in
+`composer.json` (it ships in the package, and phpBB's extension manager shows it; `ext.php`
+declares none). The repository keeps no changelog; the release notes are GitHub's
+generated ones.
+
+1. Set `"version"` to the release (`0.1.0-dev` → `0.1.0`) in a pull request, and merge it.
+2. The owner creates the tag `v<version>` (`v0.1.0`) through GitHub Releases: "Draft a
+   new release", a new tag on `main`, publish. Tag pushes from Claude Code sessions are
+   refused, so a session never tags.
+3. The tag's push starts `.github/workflows/release.yml`, which builds
+   `build/minos-moderation-<version>.zip` with `bin/build-zip.sh` on PHP 7.4 and lists it,
+   failing on any hit: `composer.lock`, `tests/`, `phpunit*`, the mock gateway, `.git*`,
+   `CLAUDE.md`, `.claude/`, `.github/`; it also fails unless `minos/moderation/LICENSE` is
+   inside and the shipped `composer.json`'s `"version"` equals the tag without the `v`
+   (the message names both). Only then it attaches the zip to the tag's release: it
+   creates the release (`--verify-tag`, generated notes, a pre-release for a tag with `-`)
+   or, when the owner already published one, replaces the asset (`--clobber`).
+4. If `main` keeps a `-dev` version between releases, as it does before the first one,
+   set the next one (`0.2.0-dev`) in a following pull request.
+
+A dry run before tagging: Actions → Release → "Run workflow" on a branch, with the tag to
+check the version against. It builds and checks the same way and only keeps the zip as
+the run's `release-archive` artifact (7 days). By hand: `bash bin/build-zip.sh`, then
+`.github/scripts/check-release-archive.sh build/minos-moderation-0.1.0.zip v0.1.0`.
+
+Before the first public release, `minos-moderation/client-php` needs a tagged version
+(`v0.1.0`) that `composer.json` can require (`^0.1`); until it exists the lock pins a
+commit of `dev-main` (see "Composer"). Moving to the tag is its own change, not part of a
+release.
 
 ## phpBB APIs
 
