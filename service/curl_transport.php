@@ -3,7 +3,7 @@
  *
  * Minos post moderation. An extension for the phpBB Forum Software package.
  *
- * @copyright (c) 2026 Minos
+ * @copyright (c) 2026 INPERITIA
  * @license GNU General Public License, version 2 (GPL-2.0)
  *
  */
