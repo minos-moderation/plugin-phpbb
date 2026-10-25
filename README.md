@@ -4,8 +4,10 @@ Rozszerzenie phpBB 3.3, które przed publikacją wysyła nowe posty do bramy Wer
 (usługa Minos) i stosuje werdykt, który brama odsyła podpisanym webhookiem: publikuje post,
 publikuje go z zamaskowanymi fragmentami albo zostawia w kolejce do zatwierdzenia.
 
-> **Stan:** trasa B2B bramy nie jest jeszcze otwarta produkcyjnie. Do czasu jej otwarcia
-> rozszerzenie można uruchomić z atrapą bramy (zob. `docs/development.md`).
+> **Stan:** rozszerzenie korzysta z asynchronicznej trasy bramy (`POST /api/v1/b2b/oceny`),
+> otwartej produkcyjnie od 25 października 2026: brama przyjmuje post od razu, a werdykt
+> odsyła później podpisanym webhookiem. Bez klucza rozszerzenie można uruchomić z atrapą
+> bramy z `minos-moderation/client-php` (zob. `docs/development.md`).
 
 ## Wymagania
 
