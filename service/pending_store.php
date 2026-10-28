@@ -192,6 +192,18 @@ class pending_store
 	}
 
 	/**
+	 * Rows whose post the extension still keeps in the queue: waiting for a verdict, or for a
+	 * recorded outcome to be applied.
+	 *
+	 * @param int $limit At most this many.
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function unsettled($limit)
+	{
+		return $this->select($this->db->sql_in_set('status', self::UNSETTLED), 'post_id', $limit);
+	}
+
+	/**
 	 * The newest rows, for the ACP.
 	 *
 	 * @param int $limit At most this many.

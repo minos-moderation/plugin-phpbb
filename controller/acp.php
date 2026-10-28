@@ -35,6 +35,9 @@ class acp
 	/** Days the verdict times and counts cover. */
 	const STATS_DAYS = 7;
 
+	/** Waiting posts whose moderators are e-mailed when the assessment is switched off. */
+	const NOTIFY_LIMIT = 1000;
+
 	/** The webhook route's name. */
 	const WEBHOOK_ROUTE = 'minos_moderation_webhook';
 
@@ -74,7 +77,7 @@ class acp
 	/**
 	 * @param settings                         $settings  The administrator's settings.
 	 * @param pending_store                    $store     The pending rows.
-	 * @param forum                            $forum     The board's user groups.
+	 * @param forum                            $forum     The board's user groups; the queue's notices.
 	 * @param \phpbb\request\request_interface $request   The form.
 	 * @param \phpbb\template\template         $template  The page.
 	 * @param \phpbb\language\language         $language  The texts.
@@ -132,6 +135,11 @@ class acp
 					{
 						// Switched on again: what waited is sent again, with a fresh time-out.
 						$this->store->restart_waiting(time());
+					}
+					else if ($was_enabled && !$this->settings->enabled())
+					{
+						// Switched off: what waits is the moderators' alone now.
+						$this->notify_waiting();
 					}
 					$this->log->add('admin', $this->user->data['user_id'], $this->user->ip, 'LOG_MINOS_SETTINGS_UPDATED');
 				}
@@ -292,6 +300,25 @@ class acp
 	{
 		$url = $this->settings->gateway_url();
 		return ($url !== '') ? $url : settings::DEFAULT_GATEWAY_URL;
+	}
+
+	/**
+	 * Gives the moderators the e-mail held back while the extension assessed a post
+	 * ({@see forum::notify_queue}), for every post it still keeps in the queue: switched off,
+	 * it decides nothing more about them.
+	 *
+	 * @return void
+	 */
+	protected function notify_waiting()
+	{
+		foreach ($this->store->unsettled(self::NOTIFY_LIMIT) as $row)
+		{
+			$post = $this->forum->load_post((int) $row['post_id']);
+			if ($post !== null && $this->forum->awaits_approval($post))
+			{
+				$this->forum->notify_queue($post);
+			}
+		}
 	}
 
 	/**

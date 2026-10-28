@@ -196,6 +196,11 @@ class verdict_applier
 				// outcome is not about this post as it is, and that decision stands.
 				$status = $this->store->finish($post_id, $revision, pending_store::SUPERSEDED, '', $now, array('approved_at' => 0, 'approved_md5' => ''))
 					? pending_store::SUPERSEDED : null;
+				if ($status !== null && $post !== null && !$late && $this->forum->awaits_approval($post))
+				{
+					// Still in the queue, now a moderator's alone: the e-mail held back for it.
+					$this->forum->notify_queue($post);
+				}
 				$this->db->sql_transaction('commit');
 				return $status;
 			}
@@ -300,6 +305,11 @@ class verdict_applier
 					if ($late)
 					{
 						$this->forum->return_to_queue($post, $now);
+					}
+					else
+					{
+						// phpBB told the moderators on the board only; now they get the e-mail too.
+						$this->forum->notify_queue($post);
 					}
 				break;
 			}

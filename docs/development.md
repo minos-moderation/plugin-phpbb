@@ -14,7 +14,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `client_loader.php` | Loads `Minos\Client` from the bundled `vendor/` (see "Composer"). |
 | `config/services.yml`, `config/routing.yml` | The services; the `POST /minos/webhook` route. |
 | `event/acp_notice.php`, `adm/style/event/` | Every ACP page: what is missing while the extension is switched on without a usable configuration. |
-| `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. |
+| `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. Notifications: keeps phpBB's "in the queue" notice of a held post on the board only. |
 | `service/submitter.php`, `service/curl_transport.php` | `POST /api/v1/b2b/oceny` and every class of answer. |
 | `controller/webhook.php`, `service/receiver.php` | The receiving checklist: raw body, signature, payload, record. |
 | `event/deferred_verdicts.php` | Applies what the webhook recorded, on `kernel.terminate`, after the answer. |
@@ -161,6 +161,20 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
 - **Notifications once.** `content_visibility` sends none; the extension's approval sends
   what the MCP's approval would (topic, or post and bookmark; quote), and the adapter never
   approves a post that is not in the queue, so phpBB's own path is never doubled.
+- **The moderators' e-mail about a post in the queue waits for the outcome** (audit K-60).
+  `submit_post()` notifies the moderators of every post it stores in the queue
+  (`topic_in_queue` / `post_in_queue`, also by e-mail). For a post the extension holds - its
+  flag is in the post data, which `submit_post()` merges into the notification's data - the
+  listener on `core.notification_manager_add_notifications` keeps only the board method of
+  every recipient: the notice is listed, no e-mail leaves. When the extension leaves the post
+  to a moderator (`HELD`: a verdict, the fail-closed failure mode, no text to assess, or an
+  outcome that no longer fits the post), `forum::notify_queue` withdraws the notice and adds
+  it again, so phpBB - which skips a user already notified about the item by any method -
+  sends it by every method once. A post the extension publishes withdraws the notice
+  (`approve()`) and never e-mails. A post the extension does not hold keeps phpBB's own
+  notification. Switched off in the ACP while posts wait, every post still in the queue gets
+  its e-mail then (`controller/acp.php`, at most 1000); disabled in the extension manager,
+  nothing runs: the notices stay listed and no e-mail follows.
 - **The key and the secret** live in `config_text`, are read raw from the ACP form (phpBB's
   `request->variable()` would HTML-escape a secret), and are shown back only as a prefix. A
   stored secret that is not 16-255 visible characters refuses every delivery.
@@ -187,7 +201,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
@@ -324,6 +338,16 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   through the real formatter for the fixtures;
   `parser_interface::parse()`, `disable_bbcodes()`, `disable_smilies()`,
   `disable_magic_url()` and their `enable_*`; `message_parser` feeding the parser raw text;
+- `core.notification_manager_add_notifications` (since 3.1.3-RC1), triggered in
+  `manager::add_notifications()` for one type after `find_users_for_notification()`, with
+  `notify_users` (user id => the methods: `notification.method.board`,
+  `notification.method.email`, ...) to be changed; `add_notifications_for_users()` then
+  skips a user already notified about the item by any method (the e-mail method by its
+  `notification_emails` record, which `delete_notifications()` leaves); `submit_post()`
+  sending `topic_in_queue` / `post_in_queue` for an `ITEM_UNAPPROVED` new post and an
+  `ITEM_REAPPROVE` edit with `$data_ary` merged into the data, after its commit and before
+  `core.submit_post_end`; `topic::get_item_id()` (the topic) and `post::get_item_id()` (the
+  post);
 - `log_interface::add()` with the `mod` and `critical` modes; `language::lang()` returning a
   missing key as itself; `add_mod_info()` loading `info_acp_*` / `info_mcp_*` files;
 - `db\driver\driver_interface` (the members in the stub; nested transactions),
@@ -347,7 +371,8 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
 
 Not verified by running: the extension has not been installed on a live phpBB board. In
 particular, whether phpBB's renderer shows the parser's output for a masked text exactly as
-expected, the notification e-mails sent on an approval by the extension, the MCP template
+expected, the notification e-mails sent on an approval by the extension, the "in the queue"
+e-mail held back while a post is assessed and sent when it is left to a moderator, the MCP template
 event's look in prosilver, and the ACP page's look are known only from the source. The
 area51 documentation was not reachable from the development environment; phpBB's source
 was.

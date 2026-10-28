@@ -29,6 +29,12 @@ class forum
 	/** phpBB's `GROUP_SPECIAL` (`includes/constants.php`): a group phpBB itself created. */
 	const GROUP_SPECIAL = 3;
 
+	/** phpBB's notification types that tell moderators a post or topic waits for approval. */
+	const QUEUE_NOTIFICATIONS = array('notification.type.topic_in_queue', 'notification.type.post_in_queue');
+
+	/** phpBB's notification method that only lists a notification on the board (no e-mail). */
+	const BOARD_METHOD = 'notification.method.board';
+
 	/** The gateway's mask character. */
 	const MASK = '█';
 
@@ -646,6 +652,26 @@ class forum
 		$this->set_visibility(ITEM_REAPPROVE, $post, '', $time);
 		$first = (int) $post['post_id'] <= (int) $post['topic_first_post_id'];
 		$this->notifications->add_notifications($first ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue', $post);
+	}
+
+	/**
+	 * Tells the moderators, once, that a post the extension leaves in the queue waits for them:
+	 * phpBB's own "post in the queue" (or "topic in the queue") notification with its e-mail.
+	 *
+	 * While the extension assessed the post, phpBB's notification of its posting reached the
+	 * board only ({@see \minos\moderation\event\listener::hold_back_queue_messages}); it is
+	 * withdrawn and sent again, so phpBB - which skips a user it already notified about the
+	 * item - delivers it by every method each moderator chose.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return void
+	 */
+	public function notify_queue(array $post)
+	{
+		$first = (int) $post['post_id'] <= (int) $post['topic_first_post_id'];
+		$type = $first ? self::QUEUE_NOTIFICATIONS[0] : self::QUEUE_NOTIFICATIONS[1];
+		$this->notifications->delete_notifications($type, $first ? (int) $post['topic_id'] : (int) $post['post_id']);
+		$this->notifications->add_notifications($type, $post);
 	}
 
 	/**

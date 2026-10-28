@@ -33,6 +33,7 @@ final class ListenerTest extends TestCase
 			'core.submit_post_end',
 			'core.mcp_queue_get_posts_modify_post_row',
 			'core.mcp_queue_approve_details_template',
+			'core.notification_manager_add_notifications',
 		), array_keys(listener::getSubscribedEvents()));
 		foreach (listener::getSubscribedEvents() as $method)
 		{

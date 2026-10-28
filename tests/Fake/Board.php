@@ -161,6 +161,12 @@ class Board
 		$board->auth->global['f_noapprove'] = true;
 		$board->user = new \phpbb\user();
 		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
+		// phpBB's dispatcher runs the extension's listener inside the notification manager.
+		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board) {
+			$events = listener::getSubscribedEvents();
+			$method = $events['core.notification_manager_add_notifications'];
+			$board->listener->$method($event);
+		};
 		return $board;
 	}
 
@@ -257,6 +263,13 @@ class Board
 		$post_id = $this->write_post($xml, $visibility, $options + array('forum_id' => $forum_id));
 
 		$data['post_id'] = $post_id;
+		// What submit_post() then sends for a post in the queue, with the post data the
+		// "before" event left (the extension's flag included).
+		if ($visibility === ITEM_UNAPPROVED)
+		{
+			$this->notifications->submit_post_notification(($mode === 'post') ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue',
+				$data + array('topic_id' => (int) $this->post($post_id)['topic_id']));
+		}
 		$this->listener->send_for_assessment(new \phpbb\event\data(array(
 			'mode'            => $mode,
 			'data'            => $data,
@@ -295,6 +308,13 @@ class Board
 		{
 			$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET topic_title = '" . $this->db->sql_escape($title) . "'
 				WHERE topic_first_post_id = " . (int) $post_id);
+		}
+		// submit_post() for an edit that puts a published post back into the queue.
+		if ($visibility === ITEM_REAPPROVE && (int) $post['post_visibility'] !== ITEM_REAPPROVE)
+		{
+			$first = (int) $post_id === (int) $this->first_post((int) $post['topic_id']);
+			$this->notifications->submit_post_notification($first ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue',
+				$data + array('topic_id' => (int) $post['topic_id']));
 		}
 		$this->listener->send_for_assessment(new \phpbb\event\data(array(
 			'mode'            => 'edit',
@@ -349,6 +369,20 @@ class Board
 		$row = $this->db->sql_fetchrow($result);
 		$this->db->sql_freeresult($result);
 		return $row;
+	}
+
+	/**
+	 * The first post of a topic.
+	 *
+	 * @param int $topic_id
+	 * @return int
+	 */
+	public function first_post($topic_id)
+	{
+		$result = $this->db->sql_query('SELECT topic_first_post_id FROM ' . self::PREFIX . 'topics WHERE topic_id = ' . (int) $topic_id);
+		$topic = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $topic ? (int) $topic['topic_first_post_id'] : 0;
 	}
 
 	/**

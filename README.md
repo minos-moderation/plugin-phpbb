@@ -97,11 +97,17 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    cytowanych) wychodzą raz, w chwili publikacji przez rozszerzenie; jeśli post zatwierdził
    moderator, powiadamia wyłącznie phpBB.
 
-   Uwaga: dla każdego wstrzymanego postu phpBB od razu, jeszcze przed werdyktem, wysyła
-   moderatorom swoje zwykłe powiadomienie (także e-mailem, jeśli mają je włączone), że post
-   lub temat czeka w kolejce. Gdy rozszerzenie opublikuje post, to powiadomienie zostaje
-   wycofane z listy powiadomień, ale wysłanego e-maila nie da się cofnąć. Moderatorzy, którym
-   to przeszkadza, mogą wyłączyć e-maile „post/temat czeka na zatwierdzenie” w swoim panelu.
+   Powiadomienie phpBB „post/temat czeka na zatwierdzenie” o poście, który rozszerzenie
+   wstrzymało do oceny, pojawia się od razu tylko na liście powiadomień na forum: e-mail z
+   nim (i inne wiadomości) rozszerzenie wstrzymuje. Gdy rozszerzenie opublikuje post,
+   powiadomienie znika z listy, a e-mail nie wychodzi wcale. Gdy zostawi post w kolejce dla
+   moderatora (werdykt, tryb awarii fail-closed, brak tekstu do oceny, post zmieniony w
+   czasie oceny), moderatorzy dostają to powiadomienie jeszcze raz, tym razem także e-mailem
+   (jeśli mają je włączone) — jeden raz. O postach, których rozszerzenie nie wstrzymuje,
+   phpBB powiadamia jak zwykle. Jeśli wyłączysz ocenianie w ustawieniach, gdy posty czekają
+   na werdykt, moderatorzy dostają wtedy e-mail o każdym z nich (od tej chwili decydują o
+   nich sami). Po wyłączeniu rozszerzenia w menedżerze rozszerzeń e-mail o nich nie wyjdzie:
+   posty widać w kolejce i na liście powiadomień.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.
