@@ -62,6 +62,14 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
   moderators and not sent: nothing would be done with its verdict.
+- **The title is assessed with the text** (the shared rule of the Minos plugins): the first
+  post of a topic is sent as the topic's title, decoded as a reader sees it, a blank line and
+  the post's text, all within the 3000 characters; a reply as its own subject and its text,
+  only when the author changed phpBB's default "Re: <title>". A title alone is never sent.
+  Each attempt reads the title from the topic, and `sent_md5` covers it, so a title changed
+  while the post waits is a new revision (an edit) or a verdict that no longer applies. A
+  masked text that touches the title (or the blank line) holds the post: the extension never
+  changes a title (`forum::masked_body`).
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
@@ -103,8 +111,8 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers); `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id. |

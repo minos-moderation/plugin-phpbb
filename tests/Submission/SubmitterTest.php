@@ -40,7 +40,7 @@ final class SubmitterTest extends TestCase
 		$item = $this->gateway->items(0)[0];
 		self::assertSame(array('id', 'tekst', 'profil', 'meta'), array_keys($item));
 		self::assertSame('phpbb:' . $id, $item['id']);
-		self::assertSame('Zwykły testowy wpis.', $item['tekst']);
+		self::assertSame($this->board->title($id) . "\n\nZwykły testowy wpis.", $item['tekst'], 'a new topic: its title, a blank line, its text');
 		self::assertSame('forum_adult', $item['profil']);
 	}
 
@@ -95,11 +95,13 @@ final class SubmitterTest extends TestCase
 		$text = str_repeat('Zażółć gęślą jaźń. ', 250);
 		self::assertGreaterThan(3000, mb_strlen($text));
 
-		$this->board->posting($text);
+		$id = $this->board->posting($text)['post_id'];
 
 		$sent = $this->gateway->items(0)[0]['tekst'];
-		self::assertSame(3000, mb_strlen($sent));
-		self::assertSame(0, strpos($text, $sent), 'the sent text is the beginning of the post');
+		self::assertSame(3000, mb_strlen($sent), 'the title counts within the 3000 characters');
+		$title = $this->board->title($id) . "\n\n";
+		self::assertSame(0, strpos($sent, $title));
+		self::assertSame(0, strpos($text, substr($sent, strlen($title))), 'then the beginning of the post');
 	}
 
 	/**
@@ -125,10 +127,10 @@ final class SubmitterTest extends TestCase
 	 */
 	public function testAQuoteIsSentWithItsAuthorAndAPostOfOnlyAQuoteIsHeld(string $xml, string $sent): void
 	{
-		$posted = $this->board->posting('', 'post', array('xml' => $xml));
+		$posted = $this->board->posting('', 'reply', array('xml' => $xml, 'topic_id' => $this->topic()));
 
 		self::assertSame(ITEM_UNAPPROVED, $posted['visibility'], 'wrapping words in a quote does not publish them');
-		self::assertSame($sent, $this->gateway->items(0)[0]['tekst']);
+		self::assertSame($sent, $this->gateway->items(0)[0]['tekst'], 'a reply under the default subject: its text alone');
 	}
 
 	public function testFormattingStaysHomeAndLinksAreCounted(): void
@@ -362,5 +364,73 @@ final class SubmitterTest extends TestCase
 
 		self::assertCount(1, $this->gateway->requests);
 		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
+	}
+
+	public function testANewTopicIsSentWithItsTitleFirst(): void
+	{
+		// Audit probe B P1, the other way round: the title used to stay home, so an offensive
+		// title over a neutral text was published as `bezpieczne`.
+		$this->board->posting('Neutralna treść pierwszego postu.', 'post', array('title' => 'Obraźliwy tytuł tematu'));
+
+		self::assertSame("Obraźliwy tytuł tematu\n\nNeutralna treść pierwszego postu.", $this->gateway->items(0)[0]['tekst']);
+	}
+
+	public function testTheTitleIsSentAsAReaderSeesIt(): void
+	{
+		// phpBB stores a subject HTML-escaped, a character beyond the BMP as a numeric entity.
+		$this->board->posting('Treść.', 'post', array('title' => 'Kot &amp; pies &quot;razem&quot; &lt;3 &#128512; &amp;amp;'));
+
+		self::assertSame("Kot & pies \"razem\" <3 \u{1F600} &amp;\n\nTreść.", $this->gateway->items(0)[0]['tekst']);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public function replySubjects(): array
+	{
+		return array(
+			'phpBB\'s default subject' => array('Wątek o pogodzie', 'Re: Wątek o pogodzie', 'Treść odpowiedzi.'),
+			'the default under a title starting with "Re: "' => array('Re: pogoda', 'Re: pogoda', 'Treść odpowiedzi.'),
+			'the topic\'s title without "Re: "' => array('Wątek o pogodzie', 'Wątek o pogodzie', 'Treść odpowiedzi.'),
+			'a subject the author wrote' => array('Wątek o pogodzie', 'Własny temat odpowiedzi', "Własny temat odpowiedzi\n\nTreść odpowiedzi."),
+		);
+	}
+
+	/**
+	 * @dataProvider replySubjects
+	 */
+	public function testAReplyCarriesOnlyASubjectItsAuthorWrote(string $title, string $subject, string $sent): void
+	{
+		$topic = $this->topic($title);
+
+		$this->board->posting('Treść odpowiedzi.', 'reply', array('topic_id' => $topic, 'subject' => $subject));
+
+		self::assertSame($sent, $this->gateway->items(0)[0]['tekst']);
+	}
+
+	public function testARetryReadsTheTitleFromTheTopic(): void
+	{
+		$this->gateway->refuse(503, 'kolejka_niedostepna');
+		$now = time();
+		$id = $this->board->posting('Treść czekająca na ponowienie.', 'post', array('title' => 'Pierwszy tytuł'))['post_id'];
+		$this->board->db->sql_query("UPDATE phpbb_topics SET topic_title = 'Tytuł zmieniony w czasie oczekiwania'
+			WHERE topic_first_post_id = " . $id);
+
+		$this->board->submitter->submit($this->board->store->due($now + 61, 10), $now + 61);
+
+		self::assertSame("Tytuł zmieniony w czasie oczekiwania\n\nTreść czekająca na ponowienie.", $this->gateway->items(1)[0]['tekst']);
+		self::assertSame(md5($this->gateway->items(1)[0]['tekst']), $this->board->row($id)['sent_md5'], 'the digest covers the title');
+	}
+
+	/**
+	 * An approved topic by someone the extension does not hold, for replies.
+	 *
+	 * @param string $title The topic's title, as stored.
+	 * @return int The topic.
+	 */
+	private function topic(string $title = 'Wątek testowy'): int
+	{
+		$first = $this->board->write_post($this->board->xml('Pierwszy wpis tematu.'), ITEM_APPROVED, array('title' => $title));
+		return (int) $this->board->post($first)['topic_id'];
 	}
 }

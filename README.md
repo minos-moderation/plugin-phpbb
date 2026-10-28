@@ -80,7 +80,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
-   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, a wysłany tekst jest
+   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł wysłany razem z
+   postem został nietknięty (rozszerzenie nigdy nie zmienia tytułu), a wysłany tekst jest
    dokładnie tym, co napisał autor (post bez formatowania BBCode, cytatów i atrybutów —
    inaczej publikacja zmieniłaby więcej niż zamaskowane słowa). W każdym innym wypadku post
    zostaje w kolejce z notatką „zamaskowany tekst wymaga ręcznego zastosowania”, a
@@ -101,8 +102,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.
-Jeśli autor poprawi post, który czeka na werdykt, post zostaje w kolejce i jest oceniany od
-nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
+Jeśli autor poprawi post, który czeka na werdykt (także sam tytuł tematu), post zostaje w
+kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 ## Tryb awarii
 
@@ -138,7 +139,10 @@ Do bramy trafia wyłącznie:
 - tekst postu: **pierwsze 3000 znaków**, razem z cytatami — każdy poprzedzony wierszem
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
-  `title` i `alt` (tam też można ukryć słowa);
+  `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
+  tytułem tematu i pustym wierszem (tytuł mieści się w tych 3000 znakach); odpowiedź —
+  własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam tytuł, bez tekstu postu, nie
+  jest wysyłany;
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
@@ -190,7 +194,6 @@ To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerz
 
 ## Ograniczenia
 
-- Oceniana jest treść postu, nie tytuł tematu.
 - Poprawki postów już opublikowanych nie są oceniane ponownie.
 - Publikacja z maskowaniem zastępuje tekst postu zwykłym tekstem (bez formatowania), a
   indeks wyszukiwarki phpBB zachowuje słowa z oryginału.

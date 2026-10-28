@@ -16,8 +16,10 @@ use minos\moderation\platform\forum;
  * Sends queued posts to the gateway (`POST /api/v1/b2b/oceny`) and handles the answer.
  *
  * What leaves the forum is exactly: an id (`phpbb:<post id>`, with `.<revision>` after an
- * edit), the post's plain text (its first 3000 characters), the profile, and two spam
- * signals (`links`, `author_first_post`). Never an e-mail, an IP address or a user id.
+ * edit), the post's plain text - for the first post of a topic preceded by the topic's title
+ * and a blank line - (its first 3000 characters, title included), the profile, and the spam
+ * signals (`links`, `link_domains`, `author_first_post`). Never an e-mail, an IP address or
+ * a user id.
  *
  * - `202` whose `przyjete` names every item: the rows wait for their webhooks;
  * - `429`, `503`, another `5xx`, no answer at all, or an answer that is not the gateway's:
@@ -164,10 +166,11 @@ class submitter
 			$this->store->supersede((int) $row['post_id'], (int) $row['revision'], $now);
 			return null;
 		}
-		$text = forum::first_chars($this->forum->plain_text((string) $post['post_text']));
+		// The title is read from the topic on every attempt: what is sent is what a reader sees now.
+		$text = forum::first_chars($this->forum->text_of($post));
 		if ($text === '')
 		{
-			// Edited down to nothing assessable while it waited.
+			// Edited down to nothing assessable while it waited (a title alone is never sent).
 			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
 			return null;
 		}

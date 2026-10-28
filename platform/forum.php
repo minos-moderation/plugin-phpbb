@@ -32,6 +32,12 @@ class forum
 	/** What introduces a quote's author in the text sent (content, in Polish). */
 	const QUOTE_AUTHOR_SUFFIX = ' napisał(a):';
 
+	/** What separates a title from the post's text in the text sent: a blank line. */
+	const TITLE_SEPARATOR = "\n\n";
+
+	/** What phpBB puts before the topic's title in a reply's default subject. */
+	const REPLY_PREFIX = 'Re: ';
+
 	/** The most `meta.link_domains` the gateway keeps. */
 	const MAX_LINK_DOMAINS = 10;
 
@@ -157,6 +163,48 @@ class forum
 	}
 
 	/**
+	 * The title a reader sees above a post, when it belongs in the text sent: the topic's
+	 * title for the first post of a topic; for a reply, its own subject, only when the author
+	 * wrote one (phpBB fills in "Re: " and the topic's title, which tells nothing new).
+	 *
+	 * phpBB stores titles HTML-escaped (and characters beyond the BMP as numeric entities);
+	 * the title is decoded once, to what the reader sees.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string The title, trimmed, or '' for none.
+	 */
+	public function title_of(array $post)
+	{
+		$topic_title = isset($post['topic_title']) ? self::decoded_line((string) $post['topic_title']) : '';
+		if ((int) $post['post_id'] === (int) $post['topic_first_post_id'])
+		{
+			return $topic_title;
+		}
+		$subject = isset($post['post_subject']) ? self::decoded_line((string) $post['post_subject']) : '';
+		$default = ((strpos($topic_title, self::REPLY_PREFIX) === 0) ? '' : self::REPLY_PREFIX) . $topic_title;
+		return ($subject === $default || $subject === $topic_title) ? '' : $subject;
+	}
+
+	/**
+	 * The whole text the gateway reads for a post: its title ({@see title_of}), a blank line
+	 * and the post's plain text ({@see plain_text}). A title alone is never sent: without
+	 * text to assess in the post itself, the result is ''. The text is NOT shortened here.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string
+	 */
+	public function text_of(array $post)
+	{
+		$text = $this->plain_text((string) $post['post_text']);
+		if ($text === '')
+		{
+			return '';
+		}
+		$title = $this->title_of($post);
+		return ($title !== '') ? $title . self::TITLE_SEPARATOR . $text : $text;
+	}
+
+	/**
 	 * The first {@see MAX_CHARS} characters of a plain text, the part the gateway assesses.
 	 *
 	 * @param string $text A plain text.
@@ -174,39 +222,57 @@ class forum
 	/**
 	 * Whether the gateway's masked text can replace the post's text as it is.
 	 *
-	 * Only when (a) it is the text sent with some characters replaced by `█` - the same
-	 * length in characters, every other character unchanged - and (b) the text sent is exactly
-	 * what the author wrote: no BBCode, quote or attribute text was transformed on the way out,
-	 * so publishing the masked text changes nothing but the masked characters. Anything else
-	 * is for a moderator to apply by hand.
-	 *
 	 * @param array<string,mixed> $post   A row from {@see load_post}.
 	 * @param string              $masked The gateway's `ocenzurowany`.
 	 * @return bool
+	 * @see masked_body
 	 */
 	public function mask_fits(array $post, $masked)
 	{
-		$sent = self::first_chars($this->plain_text((string) $post['post_text']));
+		return $this->masked_body($post, $masked) !== null;
+	}
+
+	/**
+	 * The post's new text when the gateway's masked text can replace it as it is, or null.
+	 *
+	 * Only when (a) it is the text sent ({@see text_of}, whole) with some characters replaced
+	 * by `█` - the same length in characters, every other character unchanged; (b) the title
+	 * sent with it is untouched: the extension never changes a title, so a mask in the title
+	 * is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
+	 * BBCode, quote or attribute text was transformed on the way out, so publishing the masked
+	 * text changes nothing but the masked characters. Anything else is for a moderator to
+	 * apply by hand.
+	 *
+	 * @param array<string,mixed> $post   A row from {@see load_post}.
+	 * @param string              $masked The gateway's `ocenzurowany`.
+	 * @return string|null The masked text without the title: what replaces the post's text.
+	 */
+	public function masked_body(array $post, $masked)
+	{
+		$body = $this->plain_text((string) $post['post_text']);
 		$raw = str_replace(array("\r\n", "\r"), "\n", (string) $this->text_utils->unparse((string) $post['post_text']));
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $raw);
-		if ($sent === '' || $sent !== (is_string($trimmed) ? $trimmed : trim($raw)))
+		$text = $this->text_of($post);
+		if ($body === '' || $body !== (is_string($trimmed) ? $trimmed : trim($raw)) || self::first_chars($text) !== $text)
 		{
-			return false;
+			return null;
 		}
-		$sent_chars = preg_split('//u', $sent, -1, PREG_SPLIT_NO_EMPTY);
+		$sent_chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
 		$masked_chars = preg_split('//u', (string) $masked, -1, PREG_SPLIT_NO_EMPTY);
 		if (!is_array($sent_chars) || !is_array($masked_chars) || count($sent_chars) !== count($masked_chars))
 		{
-			return false;
+			return null;
 		}
+		// Everything before the post's own text: the title and the blank line.
+		$title_chars = count($sent_chars) - mb_strlen($body, 'UTF-8');
 		foreach ($masked_chars as $i => $char)
 		{
-			if ($char !== $sent_chars[$i] && $char !== self::MASK)
+			if ($char !== $sent_chars[$i] && ($char !== self::MASK || $i < $title_chars))
 			{
-				return false;
+				return null;
 			}
 		}
-		return true;
+		return implode('', array_slice($masked_chars, $title_chars));
 	}
 
 	/**
@@ -273,6 +339,20 @@ class forum
 		$count = count($labels);
 		$take = ($count >= 3 && strlen($labels[$count - 1]) === 2 && in_array($labels[$count - 2], self::SECOND_LEVEL_LABELS, true)) ? 3 : 2;
 		return implode('.', array_slice($labels, -$take));
+	}
+
+	/**
+	 * A one-line text as phpBB stores it (a subject: HTML-escaped, numeric entities for
+	 * characters beyond the BMP), decoded once and trimmed.
+	 *
+	 * @param string $stored The stored value.
+	 * @return string
+	 */
+	protected static function decoded_line($stored)
+	{
+		$text = str_replace(array("\r\n", "\r", "\n"), ' ', html_entity_decode((string) $stored, ENT_QUOTES, 'UTF-8'));
+		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
+		return is_string($trimmed) ? $trimmed : trim($text);
 	}
 
 	/**

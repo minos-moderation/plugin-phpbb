@@ -146,7 +146,19 @@ final class ListenerTest extends TestCase
 		self::assertSame(pending_store::PENDING, $row['status']);
 		$item = $this->gateway->items(1)[0];
 		self::assertSame('phpbb:' . $id . '.1', $item['id']);
-		self::assertSame('Druga wersja wpisu.', $item['tekst']);
+		self::assertSame($this->board->title($id) . "\n\nDruga wersja wpisu.", $item['tekst']);
+	}
+
+	public function testANewTitleOfAWaitingTopicIsAssessedAgainUnderANewRevision(): void
+	{
+		$id = $this->board->posting('Treść bez zmian.', 'post', array('title' => 'Pierwszy tytuł'))['post_id'];
+
+		$this->board->edit($id, 'Treść bez zmian.', 'Tytuł zmieniony przez autora');
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame('1', $this->board->row($id)['revision']);
+		$item = $this->gateway->items(1)[0];
+		self::assertSame(array('phpbb:' . $id . '.1', "Tytuł zmieniony przez autora\n\nTreść bez zmian."), array($item['id'], $item['tekst']));
 	}
 
 	public function testSwitchedOffAnEditOfAWaitingPostIsNotSent(): void
