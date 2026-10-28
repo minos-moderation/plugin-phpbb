@@ -35,6 +35,11 @@ use minos\moderation\platform\forum;
  * to the queue or deletes it, `ocenzurowane` masks it or takes it back, `bezpieczne`
  * confirms it - unless someone changed the post since: a moderator's decision, or an edit,
  * stands.
+ *
+ * `wsparcie` (the plugins' shared rule A7) is a signal for the moderators, never a reason for
+ * an automatic removal: a post that carries it is never soft-deleted, whatever the setting
+ * for `zablokowane`. Blocked, it is held in the approval queue (a late verdict takes it back
+ * there), where the MCP marks it and the moderators get the queue e-mail; a person decides.
  */
 class verdict_applier
 {
@@ -98,14 +103,16 @@ class verdict_applier
 	 * @param string      $censored  {@see settings::censored_mode()}.
 	 * @param string      $blocked   {@see settings::blocked_mode()}.
 	 * @param string      $fail_mode {@see settings::fail_mode()}.
+	 * @param bool        $support   Whether the gateway set `wsparcie`: such a post is never
+	 *     deleted (the plugins' shared rule A7), it waits for a person.
 	 * @return string One of the action constants.
 	 */
-	public static function decide($verdict, $masked, $complete, $censored, $blocked, $fail_mode)
+	public static function decide($verdict, $masked, $complete, $censored, $blocked, $fail_mode, $support)
 	{
 		switch ($verdict)
 		{
 			case 'zablokowane':
-				return ($blocked === settings::BLOCKED_DELETE) ? self::DELETE : self::HOLD;
+				return ($blocked === settings::BLOCKED_DELETE && !$support) ? self::DELETE : self::HOLD;
 
 			case 'ocenzurowane':
 				$usable = is_string($masked) && $masked !== '' && $complete;
@@ -209,8 +216,9 @@ class verdict_applier
 			$verdict = (string) $row['verdict'];
 			$masked = ($row['masked_text'] !== '') ? (string) $row['masked_text'] : null;
 			$complete = !forum::is_cut($text);
+			$support = !empty($row['support']);
 			$action = self::decide($verdict, $masked, $complete,
-				$this->settings->censored_mode(), $this->settings->blocked_mode(), $this->settings->fail_mode());
+				$this->settings->censored_mode(), $this->settings->blocked_mode(), $this->settings->fail_mode(), $support);
 			if ($late && !self::is_verdict($verdict, $complete))
 			{
 				$action = self::KEEP;
@@ -319,7 +327,7 @@ class verdict_applier
 			{
 				$this->forum->log_decision($post, $log);
 			}
-			if (!empty($row['support']))
+			if ($support)
 			{
 				// `wsparcie`: a cue to reach out, whatever happened to the post; the moderator log
 				// shows it next to the post, also when the post was published.

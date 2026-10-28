@@ -136,6 +136,10 @@ final class NotificationTest extends TestCase
 			'blocked, kept in the queue' => array(static function (Board $board, int $id) {
 				$board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane'));
 			}),
+			'blocked with wsparcie under "delete": kept in the queue' => array(static function (Board $board, int $id) {
+				$board->configure(array(settings::BLOCKED => settings::BLOCKED_DELETE));
+				$board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane', 'wsparcie' => true));
+			}),
 			'unassessed, fail-closed' => array(static function (Board $board, int $id) {
 				$board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'nieocenione'));
 			}),

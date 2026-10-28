@@ -568,6 +568,45 @@ final class WebhookTest extends TestCase
 	}
 
 	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function blockedSettings(): array
+	{
+		return array('hold' => array(settings::HOLD), 'delete' => array(settings::BLOCKED_DELETE));
+	}
+
+	/**
+	 * @dataProvider blockedSettings
+	 */
+	public function testABlockedPostWithSupportIsHeldForTheModeratorsAndNeverDeleted(string $blocked): void
+	{
+		// The plugins' shared rule A7: `wsparcie` is a signal for the moderators, never an
+		// automatic removal. Under "Usuń miękko" such a post used to be soft-deleted.
+		$this->board->configure(array(settings::BLOCKED => $blocked));
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$notified = count($this->board->notifications->calls);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'zablokowane', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true))));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'still in the approval queue');
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->visibility->calls, 'never deleted');
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_DELETED'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_HELD'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		$kinds = array_unique(array_column(array_slice($this->board->notifications->calls, $notified), 1));
+		self::assertSame(array('notification.type.topic_in_queue'), array_values($kinds),
+			'the moderators are told of the post in their queue, and nobody else of anything');
+
+		$queue = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
+		$this->board->listener->mark_queue_row($queue);
+		self::assertStringContainsString('potrzebne wsparcie', $queue['post_row']['POST_SUBJECT'], 'the mark on the queue row');
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertTrue($details['post_data']['S_MINOS_SUPPORT'], 'the note above the post');
+	}
+
+	/**
 	 * @return array<string,array{0:string,1:int,2:string}>
 	 */
 	public function failureModes(): array

@@ -72,6 +72,26 @@ final class LateVerdictTest extends TestCase
 		self::assertSame(array($id => ITEM_APPROVED), $changes[0]['before']);
 	}
 
+	public function testALateBlockWithSupportTakesThePostBackToTheQueueEvenWhenTheSettingDeletes(): void
+	{
+		// The plugins' shared rule A7: a post with `wsparcie` is never removed automatically.
+		$id = $this->published_by_fail_open('Testowy wpis o bardzo złym dniu.');
+		$this->board->configure(array(settings::BLOCKED => settings::BLOCKED_DELETE));
+		$calls = count($this->board->visibility->calls);
+		$notified = count($this->board->notifications->calls);
+
+		self::assertSame(200, $this->late($id, 'zablokowane', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true)));
+
+		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility'], 'back in the queue, not deleted');
+		self::assertSame(array(ITEM_REAPPROVE), array_column(array_slice($this->board->visibility->calls, $calls), 'visibility'));
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_DELETED'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_RETURNED'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(array(array('add', 'notification.type.topic_in_queue', $id)),
+			array_slice($this->board->notifications->calls, $notified), 'the moderators are told, once');
+	}
+
 	public function testALateSafeVerdictConfirmsThePostWithoutNotifyingAgain(): void
 	{
 		$id = $this->published_by_fail_open();

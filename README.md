@@ -63,7 +63,7 @@ dzieje się z nimi po ponownym włączeniu — patrz „Wyłączenie”.
 | Tryb awarii | **fail-closed** | Co zrobić z postem bez werdyktu — patrz „Tryb awarii”. |
 | Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
-| Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
+| Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). Post z sygnałem `wsparcie` nigdy nie jest usuwany automatycznie: zostaje w kolejce (patrz „Wsparcie”). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
 | Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. Wybieraj grupy, z których użytkownik nie wystąpi sam (specjalne grupy phpBB, zamknięte, ukryte): z grupy otwartej członek może wystąpić w swoim panelu i od tej chwili pisać bez oceny — lista w ustawieniach oznacza takie grupy. |
 
@@ -112,7 +112,7 @@ pojedynczy komunikat nie musi oznaczać błędu ustawień.
    |---|---|---|
    | `bezpieczne` | publikacja | tryb awarii, jak przy `nieocenione` |
    | `ocenzurowane` | publikacja tekstu z zamaskowanymi fragmentami (bez formatowania; oryginał zostaje w tabeli rozszerzenia przez 30 dni, potem jest usuwany) albo kolejka — wg ustawienia; bez zamaskowanego tekstu zawsze kolejka | zawsze kolejka |
-   | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia | tak samo |
+   | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia; z `wsparcie` zawsze kolejka | tak samo |
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
@@ -166,7 +166,8 @@ tryb awarii:
 - **fail-open**: post zostaje opublikowany. Taka publikacja jest oznaczona (w dzienniku
   moderatorów i na liście w ustawieniach jako „opublikowany bez oceny”). Jeśli werdykt
   przyjdzie później, rozszerzenie go zastosuje: `zablokowane` cofa post do kolejki (albo
-  usuwa go miękko, zgodnie z ustawieniem), `ocenzurowane` maskuje go albo cofa do kolejki,
+  usuwa go miękko, zgodnie z ustawieniem; post z `wsparcie` zawsze tylko wraca do kolejki),
+  `ocenzurowane` maskuje go albo cofa do kolejki,
   `bezpieczne` potwierdza publikację. Jeśli jednak moderator w międzyczasie coś z postem
   zrobił (usunął, przywrócił, zatwierdził), zostaje decyzja człowieka.
 
@@ -291,10 +292,15 @@ werdykt liczy się tylko ocena nowej wersji.
 ## Wsparcie
 
 Gdy brama zaznaczy `wsparcie` (treść może świadczyć o samookaleczeniu lub kryzysie autora),
-rozszerzenie zapisuje to przy poście niezależnie od werdyktu: w dzienniku moderatorów, na
-liście ostatnich postów w ustawieniach oraz w kolejce do zatwierdzenia w panelu moderatora
-(oznaczenie przy temacie i opis nad treścią posta). To sygnał, by okazać wsparcie, a nie
-podstawa do kary.
+rozszerzenie zapisuje to przy poście niezależnie od werdyktu: w dzienniku moderatorów i na
+liście ostatnich postów w ustawieniach, a gdy post czeka w kolejce do zatwierdzenia — także
+tam, w panelu moderatora (oznaczenie przy temacie i opis nad treścią posta). To sygnał, by
+okazać wsparcie, a nie podstawa do kary: post z `wsparcie` nigdy nie jest usuwany
+automatycznie. Przy werdykcie `zablokowane` zostaje w kolejce do zatwierdzenia (spóźniony
+werdykt cofa opublikowany post do kolejki) także przy ustawieniu „Usuń miękko”, a moderatorzy
+dostają e-mail o poście w kolejce; decyzję podejmuje człowiek. Rozszerzenie nigdy nie pisze
+do autora postu. Post opublikowany z `wsparcie` (np. przy werdykcie `bezpieczne`) nie trafia
+do kolejki: sygnał widać wtedy w dzienniku moderatorów i na liście w ustawieniach.
 
 ## Zadanie cron
 

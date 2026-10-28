@@ -199,6 +199,30 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertStringContainsString('Minos: zablokowane', $details);
 	}
 
+	public function test_a_blocked_post_with_support_is_held_never_deleted(): void
+	{
+		// The plugins' shared rule A7: `wsparcie` is a signal for the moderators, never an
+		// automatic removal, also under the setting that soft-deletes a blocked post.
+		$this->configure();
+		$this->set_config('minos_moderation_blocked', 'delete');
+		$this->subscribe_admin_to_queue_emails();
+
+		$post_id = $this->post_as_author('Minos test support', 'Testowy wpis [minos:blokuj] [minos:kategoria=samookaleczenie]');
+		$this->work();
+		$this->set_config('minos_moderation_blocked', 'hold');
+
+		$this->assertSame(array('held', '1'), array($this->row($post_id)['status'], (string) $this->row($post_id)['support']));
+		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'in the queue, not soft-deleted');
+		$this->assertSame(1, $this->queue_emails('Minos test support'), 'left to the moderators: one e-mail');
+
+		$this->login();
+		$queue = self::request('GET', 'mcp.php?i=queue&mode=unapproved_topics&sid=' . $this->sid)->filter('#main, #page-body')->text();
+		$details = self::request('GET', 'mcp.php?i=queue&mode=approve_details&p=' . $post_id . '&sid=' . $this->sid)->filter('#page-body')->text();
+		$this->logout();
+		$this->assertStringContainsString('[Minos: zablokowane, potrzebne wsparcie] Minos test support', $queue);
+		$this->assertStringContainsString('potrzebne wsparcie', $details);
+	}
+
 	public function test_a_forged_or_stale_delivery_is_refused_and_traced_for_the_acp(): void
 	{
 		$this->configure();
