@@ -88,7 +88,6 @@ jobs:
       PHPBB_TEST_DBPASSWD: phpbb-tylko-test
       PHPBB_TEST_TABLE_PREFIX: phpbb_
       PHPBB_FUNCTIONAL_URL: http://127.0.0.1:8080/
-      COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
@@ -105,9 +104,14 @@ jobs:
           mysql -h 127.0.0.1 -uroot -proot -e "CREATE USER 'phpbb'@'%' IDENTIFIED WITH mysql_native_password BY '$PHPBB_TEST_DBPASSWD'" \
             || mysql -h 127.0.0.1 -uroot -proot -e "CREATE USER 'phpbb'@'%' IDENTIFIED BY '$PHPBB_TEST_DBPASSWD'"
           mysql -h 127.0.0.1 -uroot -proot -e "GRANT ALL ON *.* TO 'phpbb'@'%'"
+      # The token goes to the two steps that run Composer, never to the board or the tests.
       - name: phpBB 3.3.x and its test harness
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
         run: bash bin/phpbb-checkout.sh "$RUNNER_TEMP/phpbb" --tests
       - name: The extension, from its package, with the functional tests beside it
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
         run: |
           composer install --no-dev --no-interaction --no-progress --prefer-dist
           archive="$(bash bin/build-zip.sh | tail -n 1)"
