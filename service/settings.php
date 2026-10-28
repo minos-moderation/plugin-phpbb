@@ -381,7 +381,10 @@ class settings
 	 * Validates and stores the ACP form.
 	 *
 	 * An empty key or secret field keeps the stored value, so the page never needs to show
-	 * either of them back.
+	 * either of them back. A save also ends the gateway's pause of sending ({@see clear_pause}):
+	 * it is the administrator's own action - typically a new key or gateway address after a
+	 * refusal - and the next post tries the gateway at once; a pause that still holds comes
+	 * back with that one refused request.
 	 *
 	 * @param array<string,mixed> $values enabled (bool), gateway_url, api_key, webhook_secret,
 	 *     profile, fail_mode, censored, blocked (strings), timeout_min (int), forums (int[]),
@@ -466,6 +469,7 @@ class settings
 		{
 			$this->set_text(self::WEBHOOK_SECRET, $secret);
 		}
+		$this->clear_pause();
 		return array();
 	}
 

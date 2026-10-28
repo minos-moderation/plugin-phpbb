@@ -268,6 +268,38 @@ final class AcpControllerTest extends TestCase
 		self::assertSame('', $this->template->vars['MINOS_PAUSE']);
 	}
 
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function failureModes(): array
+	{
+		return array('fail-closed' => array(settings::FAIL_CLOSED), 'fail-open' => array(settings::FAIL_OPEN));
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testSavingTheSettingsEndsThePauseSoANewKeyIsTriedAtOnce(string $mode): void
+	{
+		// The free key's daily limit is spent: the gateway says come back in 10 hours. The
+		// administrator enters a paid key; without this every post would get the failure mode
+		// (fail-open: published unassessed) until then.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$this->board->transport->refuse(429, 'limit_dobowy_klucza', 36000);
+		$this->board->posting('Wpis, który wyczerpał limit dobowy.');
+		self::assertNotNull($this->board->settings->pause(time()));
+
+		$this->submit($this->form(array('minos_api_key' => self::NEW_KEY, 'minos_fail_mode' => $mode)));
+
+		self::assertTrue($this->template->vars['S_MINOS_SAVED']);
+		self::assertFalse($this->template->vars['S_MINOS_PAUSE'], 'the page no longer shows it');
+		$id = $this->board->posting('Wpis po zmianie klucza.')['post_id'];
+		self::assertCount(2, $this->board->transport->requests, 'the next post is sent');
+		self::assertSame(self::NEW_KEY, $this->board->transport->requests[1]['headers']['X-Gateway-Key']);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'held for its verdict, never published unassessed');
+	}
+
 	public function testAnOverloadedGatewayIsShownAsSuch(): void
 	{
 		$this->board->transport->refuse(429, 'limit_globalny_b2b', 600);

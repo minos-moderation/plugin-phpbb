@@ -152,7 +152,9 @@ decision).
   its allowance (the contract: only a refusal the key did not cause is free), hence the pause.
   A `500`, `502`, `504` or a `2xx` that is not the gateway's acceptance is retried per row
   and pauses nothing. The ACP shows the pause with its kind and hour, never the key or a
-  body; the next `202` forgets it.
+  body; the next `202` forgets it, and so does every save of the ACP form
+  (`settings::save`): a new key or gateway address is tried at once, and a pause that still
+  holds comes back after that one refused request.
 - **The time to a verdict is measured on the forum** (audit K-36). `received_at` (migration
   `verdict_times`) is when the gateway's outcome arrived (`record_verdict`, from the
   receiver's `$now`; the extension's own outcomes keep 0); `submitted_at` is the `202`. The

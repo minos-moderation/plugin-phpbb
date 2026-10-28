@@ -160,6 +160,9 @@ bramę (albo po 1, 2, 4… minutach). Jeśli przerwa kończy się później niż
 werdykt (np. po wyczerpaniu dziennego limitu klucza — do końca doby), post od razu obsługuje
 tryb awarii, bez wysyłania. Przerwę widać na stronie ustawień jako komunikat z powodem i
 godziną, do której rozszerzenie nie wysyła postów; znika po pierwszym przyjętym poście.
+Zapisanie ustawień kończy przerwę: po zmianie klucza (np. na płatny) albo adresu bramy
+zapisz ustawienia, aby spróbować od razu — następny post zostanie wysłany (jeśli brama nadal
+odmawia, przerwa wraca po tej jednej odmowie).
 Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, niedozwolony
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
