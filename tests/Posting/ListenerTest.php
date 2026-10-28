@@ -231,7 +231,8 @@ final class ListenerTest extends TestCase
 		// default subject: no title either.
 		$cases = array();
 		foreach (array('image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'blank-bold',
-			'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp') as $body)
+			'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp',
+			'image-cgj', 'image-vs16', 'image-c1-control', 'image-hangul-filler', 'image-braille-blank', 'link-label-cgj') as $body)
 		{
 			$cases[$body . ', fail-closed'] = array($body, settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD);
 			$cases[$body . ', fail-open'] = array($body, settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED);
@@ -270,6 +271,16 @@ final class ListenerTest extends TestCase
 		self::assertSame(array(), $this->gateway->requests, 'a title is never sent alone');
 		self::assertSame(array($status, 'empty_text'), array($this->board->row($id)['status'], $this->board->row($id)['error_code']));
 		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testALetterWithItsCombiningMarkIsTextAndIsSent(): void
+	{
+		// The control for the marks above: a mark beside its base letter is part of the text.
+		$id = $this->board->posting('', 'reply', array('xml' => self::stored('letter-combining-acute'), 'topic_id' => $this->topic()))['post_id'];
+
+		self::assertCount(1, $this->gateway->requests);
+		$item = $this->gateway->items(0)[0];
+		self::assertSame(array('phpbb:' . $id, "e\u{0301}"), array($item['id'], $item['tekst']));
 	}
 
 	/**

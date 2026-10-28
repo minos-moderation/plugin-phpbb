@@ -161,6 +161,18 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
 		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'fail-closed: for a moderator');
 		$this->assertSame(array(), $this->mock_queue(), 'nothing sent, not the title alone');
+
+		// A mark without its base letter (U+FE0F) is no text either, after phpBB's own input
+		// handling (NFC keeps it).
+		$post_id = $this->post_as_author('Minos test mark', "[img]https://example.org/a.png[/img]\u{FE0F}");
+
+		$db = $this->get_db();
+		$result = $db->sql_query('SELECT post_text FROM ' . POSTS_TABLE . ' WHERE post_id = ' . (int) $post_id);
+		$stored = (string) $db->sql_fetchfield('post_text');
+		$db->sql_freeresult($result);
+		$this->assertStringContainsString("\u{FE0F}", $stored, 'phpBB stored the mark');
+		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
+		$this->assertSame(array(), $this->mock_queue(), 'nothing sent');
 	}
 
 	public function test_a_masked_verdict_publishes_the_masked_text(): void

@@ -59,6 +59,16 @@ class forum
 	 */
 	const MEDIA_ELEMENTS = array('IMG', 'ATTACHMENT', 'FLASH');
 
+	/**
+	 * What a reader does not see on its own (as plugin-wordpress's and plugin-mybb's
+	 * `Text::INVISIBLE`): white space and separators (`\p{Z}`: U+3000, U+2028, ...), format
+	 * characters (`\p{Cf}`: U+200B, U+00AD, U+2060, U+200E, U+FEFF, ...), controls
+	 * (`\p{Cc}`), marks without a base letter (`\p{M}`: U+034F, U+FE0F; real text keeps its
+	 * base letters, so "e" + U+0301 stays text), and the blank fillers some scripts carry (the
+	 * Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the blank Braille pattern U+2800).
+	 */
+	const INVISIBLE = '/[\s\p{Z}\p{Cf}\p{Cc}\p{M}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+/u';
+
 	/** Elements of phpBB's stored XML that a reader sees on lines of their own. */
 	const BLOCK_ELEMENTS = array('QUOTE', 'LIST', 'LI', 'CODE', 'br', 'p');
 
@@ -243,17 +253,16 @@ class forum
 	}
 
 	/**
-	 * Whether a text holds nothing a reader sees: only white space, separators (`\p{Z}`) and
-	 * format characters (`\p{Cf}`: U+200B, U+00AD, U+2060, U+200E, U+FEFF, ...), which do not
-	 * make a text to assess (the plugins' shared rule F7). A text the pattern cannot read
-	 * (not UTF-8) is not blank: more text, never less.
+	 * Whether a text holds nothing a reader sees: only characters in {@see INVISIBLE}, which
+	 * do not make a text to assess (the plugins' shared rule F7). A text the pattern cannot
+	 * read (not UTF-8) is not blank: more text, never less.
 	 *
 	 * @param string $text A text.
 	 * @return bool
 	 */
 	public static function is_blank($text)
 	{
-		return preg_replace('/[\p{Cf}\p{Z}\s]+/u', '', (string) $text) === '';
+		return preg_replace(self::INVISIBLE, '', (string) $text) === '';
 	}
 
 	/**

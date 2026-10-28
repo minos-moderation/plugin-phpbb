@@ -19,7 +19,8 @@ final class RealFormatterFixtureTest extends TestCase
 	/** The corpus the fixtures must cover. */
 	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies',
 		'image', 'image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'url-tag', 'bare-link-only',
-		'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp', 'typed-entity');
+		'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp', 'typed-entity',
+		'image-cgj', 'image-vs16', 'image-c1-control', 'image-hangul-filler', 'image-braille-blank', 'link-label-cgj', 'letter-combining-acute');
 
 	/**
 	 * @return array<string,array{0:array<string,string>}>
@@ -107,6 +108,15 @@ final class RealFormatterFixtureTest extends TestCase
 			'a link labelled U+00AD' => array('link-label-shy', ''),
 			'a link labelled U+200B' => array('link-label-zwsp', ''),
 			'bold around U+200B'   => array('bold-zwsp', ''),
+			// A mark without its base letter (\p{M}), a control (\p{Cc}), a blank filler: no
+			// text either; a letter keeps its combining mark and is text.
+			'an image and U+034F'  => array('image-cgj', ''),
+			'an image and U+FE0F'  => array('image-vs16', ''),
+			'an image and U+0081'  => array('image-c1-control', ''),
+			'an image and U+3164'  => array('image-hangul-filler', ''),
+			'an image and U+2800'  => array('image-braille-blank', ''),
+			'a link labelled U+034F' => array('link-label-cgj', ''),
+			'e and U+0301'         => array('letter-combining-acute', "e\u{0301}"),
 			'the entity typed'     => array('typed-entity', '&#8203;'),
 			'plain lines'          => array('plain-lines', "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""),
 			'bold around a blank'  => array('blank-bold', ''),
