@@ -82,6 +82,17 @@ klucza, na przykład:
 Brama wysyła werdykty tylko na adres `https://` z nazwą domeny (nigdy na adres IP), tylko do
 hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
+Gdy webhook odrzuca doręczenia z nieprawidłowym podpisem, strona ustawień mówi, ile ich było
+od ostatniego przyjętego doręczenia, kiedy przyszło ostatnie i dlaczego zostało odrzucone:
+podpis nie pasuje do zapisanego sekretu (sprawdź sekret), czas podpisu różni się od zegara
+serwera forum o ponad 5 minut (sprawdź zegar serwera) albo doręczenie nie miało poprawnego
+nagłówka podpisu (np. usuwa go serwer pośredniczący). Dzięki temu zły sekret albo
+rozregulowany zegar widać bez przeglądania dzienników. Brama zawsze dostaje tę samą odpowiedź
+`401`, bez powodu; sekretu, nagłówka ani treści doręczenia rozszerzenie nigdzie nie zapisuje.
+Komunikat znika po pierwszym doręczeniu z poprawnym podpisem albo po zapisaniu nowego
+sekretu. Doręczenie z nieprawidłowym podpisem może wysłać każdy, kto zna adres webhooka, więc
+pojedynczy komunikat nie musi oznaczać błędu ustawień.
+
 ## Jak to działa
 
 1. Użytkownik wysyła nowy temat lub odpowiedź. Rozszerzenie kieruje post do kolejki do

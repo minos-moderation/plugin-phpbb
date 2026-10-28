@@ -68,6 +68,13 @@ class settings
 	/** Every kind of the gateway's pause. */
 	const PAUSE_KINDS = array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD, self::PAUSE_KEY, self::PAUSE_UNAVAILABLE);
 
+	/**
+	 * Why the webhook refused a delivery's signature, as the bundled client's
+	 * `Signature::check` names it: a header that is not `t=…,v1=…`, a timestamp further than
+	 * five minutes from the forum's clock, a MAC another secret (or another body) made.
+	 */
+	const REJECTION_REASONS = array('malformed', 'stale', 'mismatch');
+
 	/** Characters of the key shown back to the administrator (`wgb2b_` and four more). */
 	const KEY_HINT_LENGTH = 10;
 
@@ -88,6 +95,7 @@ class settings
 	const PAUSE_KIND = 'minos_moderation_pause_kind';
 	const PAUSE_UNTIL = 'minos_moderation_pause_until';
 	const PAUSE_CODE = 'minos_moderation_pause_code';
+	const SIGNATURE_REJECTED = 'minos_moderation_signature_rejected';
 
 	/** `config_text` keys. */
 	const API_KEY = 'minos_moderation_api_key';
@@ -378,13 +386,66 @@ class settings
 	}
 
 	/**
+	 * Counts a delivery whose signature the webhook refused, for the ACP: the reason
+	 * ({@see REJECTION_REASONS}) and the moment of the last one, and how many since a delivery
+	 * last passed. Never the header, the body or the secret.
+	 *
+	 * One dynamic `config` value (not cached, so a refused request never empties phpBB's
+	 * config cache): `<count> <reason> <unix seconds>`. Two refusals at the same moment may
+	 * count once; it is a trace, not a ledger.
+	 *
+	 * @param string $reason One of {@see REJECTION_REASONS}; anything else is not recorded.
+	 * @param int    $now    Unix seconds.
+	 * @return void
+	 */
+	public function record_rejection($reason, $now)
+	{
+		if (!in_array($reason, self::REJECTION_REASONS, true))
+		{
+			return;
+		}
+		$last = $this->rejections();
+		$count = ($last !== null) ? min(999999999, $last['count'] + 1) : 1;
+		$this->config->set(self::SIGNATURE_REJECTED, $count . ' ' . $reason . ' ' . (int) $now, false);
+	}
+
+	/**
+	 * Forgets the refused signatures: a delivery passed, or the administrator entered a new
+	 * secret.
+	 *
+	 * @return void
+	 */
+	public function forget_rejections()
+	{
+		if ((string) $this->config[self::SIGNATURE_REJECTED] !== '')
+		{
+			$this->config->set(self::SIGNATURE_REJECTED, '', false);
+		}
+	}
+
+	/**
+	 * The refused signatures since a delivery last passed, for the ACP.
+	 *
+	 * @return array{count:int,reason:string,time:int}|null Null when there were none.
+	 */
+	public function rejections()
+	{
+		if (!preg_match('/^([1-9][0-9]{0,8}) (malformed|stale|mismatch) ([0-9]{1,12})$/', (string) $this->config[self::SIGNATURE_REJECTED], $m))
+		{
+			return null;
+		}
+		return array('count' => (int) $m[1], 'reason' => $m[2], 'time' => (int) $m[3]);
+	}
+
+	/**
 	 * Validates and stores the ACP form.
 	 *
 	 * An empty key or secret field keeps the stored value, so the page never needs to show
 	 * either of them back. A save also ends the gateway's pause of sending ({@see clear_pause}):
 	 * it is the administrator's own action - typically a new key or gateway address after a
 	 * refusal - and the next post tries the gateway at once; a pause that still holds comes
-	 * back with that one refused request.
+	 * back with that one refused request. A new secret also forgets the refused signatures
+	 * ({@see forget_rejections}): they were refused with the old one.
 	 *
 	 * @param array<string,mixed> $values enabled (bool), gateway_url, api_key, webhook_secret,
 	 *     profile, fail_mode, censored, blocked (strings), timeout_min (int), forums (int[]),
@@ -468,6 +529,8 @@ class settings
 		if ($secret !== '')
 		{
 			$this->set_text(self::WEBHOOK_SECRET, $secret);
+			// The refusals were for the old secret; the next delivery tells about the new one.
+			$this->forget_rejections();
 		}
 		$this->clear_pause();
 		return array();

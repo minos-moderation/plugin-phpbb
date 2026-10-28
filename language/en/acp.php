@@ -73,6 +73,11 @@ $lang = array_merge($lang, array(
 	'MINOS_LAST_ERROR'           => 'Ostatni błąd konfiguracji',
 	'MINOS_LAST_ERROR_EXPLAIN'   => 'Brama odrzuciła żądanie, a posty obsłużono zgodnie z trybem awarii. Wpis jest też w dzienniku błędów.',
 
+	'MINOS_SIGNATURE_REJECTED'   => 'Webhook odrzucił doręczenia z nieprawidłowym podpisem (od ostatniego przyjętego doręczenia: %1$d, ostatnie: %2$s). %3$s Dopóki podpis się nie zgadza, werdykty bramy nie są stosowane, a posty po czasie oczekiwania obsługuje tryb awarii. Brama dostaje zawsze odpowiedź 401, bez powodu. Komunikat znika po pierwszym doręczeniu z poprawnym podpisem albo po zapisaniu nowego sekretu; takie doręczenie może też wysłać ktoś inny niż brama, kto zna adres webhooka.',
+	'MINOS_SIGNATURE_MISMATCH'   => 'Podpis nie pasuje do sekretu webhooka zapisanego w ustawieniach: sprawdź, czy wpisany sekret jest dokładnie tym, który operator bramy podał razem z kluczem.',
+	'MINOS_SIGNATURE_STALE'      => 'Czas podpisu różni się od zegara serwera forum o ponad 5 minut: sprawdź zegar serwera (synchronizację czasu, np. NTP).',
+	'MINOS_SIGNATURE_MALFORMED'  => 'Doręczenie nie miało poprawnego nagłówka podpisu X-Wergiliusz-Podpis: nie pochodzi od bramy albo serwer pośredniczący przed forum usunął lub zmienił ten nagłówek.',
+
 	'MINOS_STATS'                => 'Ostatnie 7 dni',
 	'MINOS_STATS_EXPLAIN'        => 'Liczone z zapisów rozszerzenia na tym forum, bez treści postów i bez dodatkowych zapytań do bramy: czas od przyjęcia postu przez bramę (odpowiedź 202) do doręczenia werdyktu oraz werdykty doręczone w ostatnich 7 dniach.',
 	'MINOS_STATS_WAIT'           => 'Czas do werdyktu: mediana (P50) %1$s, P95 %2$s (z %3$d werdyktów).',

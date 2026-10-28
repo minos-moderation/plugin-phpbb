@@ -25,7 +25,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `cron/sweeper.php` | Every 5 minutes: time-outs, retries, leftovers, pruning. |
 | `acp/`, `controller/acp.php`, `adm/style/` | The ACP page. |
 | `styles/all/template/event/` | The MCP note above a queued post. |
-| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`); the user groups (`user_groups`); the time a verdict arrived (`verdict_times`); the moderators told once (`queue_notice`). |
+| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`); the user groups (`user_groups`); the time a verdict arrived (`verdict_times`); the moderators told once (`queue_notice`); the refused signatures (`signature_trace`). |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 | `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
@@ -203,6 +203,15 @@ decision).
 - **The key and the secret** live in `config_text`, are read raw from the ACP form (phpBB's
   `request->variable()` would HTML-escape a secret), and are shown back only as a prefix. A
   stored secret that is not 16-255 visible characters refuses every delivery.
+- **A refused signature leaves a trace for the ACP** (audit K-60): the receiver checks with
+  the client's `Signature::check` (0.2.0; `verify` with the reason, so the verification is
+  still the client's) and counts each refusal in one dynamic `config` value (migration
+  `signature_trace`; dynamic, so an unauthenticated request never empties phpBB's config
+  cache): how many since a delivery last passed, and the reason and moment of the last -
+  `malformed`, `stale` (more than 300 s from the forum's clock) or `mismatch` (another secret
+  or another body). Never the header, the body or the secret. The answer stays `401` with an
+  empty body whatever the reason. A delivery that passes, and a new secret saved in the ACP,
+  forget it. Anyone who knows the webhook URL can add to it, which the ACP says.
 - **`link_domains`** approximates registrable domains without the Public Suffix List: two
   labels, three under a country code's `co`/`com`/`net`/`org`/`edu`/`gov`/`ac`/`info`/`biz`.
 - **`language/en/` holds the Polish texts.** phpBB falls back to `en` when the user's
@@ -226,7 +235,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
@@ -292,8 +301,10 @@ same without phpBB.
 ## Composer
 
 `composer.json` requires `minos-moderation/client-php` at `dev-main` from its GitHub
-repository; `composer.lock` pins the commit. When `client-php` is tagged, `dev-main` becomes
-`^0.1`. The extension never forks the client's verification.
+repository; `composer.lock` pins the commit: `e5df7d6d`, client-php's `main` with 0.2.0
+(`Signature::check`). When `client-php` is tagged `v0.2.0`, `dev-main` becomes `^0.2`. The
+lock moves only with a reviewed `composer update minos-moderation/client-php`, in a commit of
+its own. The extension never forks the client's verification.
 
 phpBB does not autoload an extension's `vendor/`, and requiring the bundled
 `vendor/autoload.php` would register a second Composer class loader next to phpBB's own, so
@@ -401,7 +412,9 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   install gives the group the role `ROLE_FORUM_NEW_MEMBER` (`f_noapprove` NEVER) on the
   forum it creates;
 - the ACP module discovery (`acp/*_module` with its `*_info`), the migration tools
-  `config.add`, `config_text.add` (which keeps an existing value), `module.add`, the schema types, `depends_on()` on
+  `config.add` (its third argument `is_dynamic` stores the value outside phpBB's config
+  cache, and `config\db::set($key, $value, false)` then writes it without emptying the
+  cache), `config_text.add` (which keeps an existing value), `module.add`, the schema types, `depends_on()` on
   `\phpbb\db\migration\data\v330\v330`, the cron task base (`is_runnable()`) and the
   `cron.task` tag, and `metadata_manager` (it requires `composer.json` and its fields).
 
