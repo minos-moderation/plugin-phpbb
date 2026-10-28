@@ -80,10 +80,11 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   `adm/style/event/acp_overall_header_body_before.html`), never a stored value. A fresh
   installation starts switched off. Finished rows - the original of a masked post, the
   verdict - are kept 30 days (D9.11), pruned by the cron task.
-- **A link without text to assess is the failure mode** (the plugins' shared rule D9.5): a
-  post whose text is empty but which holds a link (`<URL>`, also with a blank text a reader
-  cannot see) is held and gets the failure mode at once, without a request; the MCP notes
-  "brak tekstu do oceny" (`error_code` `empty_text`). A post with neither text nor a link
+- **A link or a title without text to assess is the failure mode** (the plugins' shared rule
+  D9.5): a post whose text is empty but which holds a link (`<URL>`, also with a blank text a
+  reader cannot see) or carries a title (a new topic, a reply's own subject) is held and
+  gets the failure mode at once, without a request; the MCP notes "brak tekstu do oceny"
+  (`error_code` `empty_text`). A reply with no text, no link and the default subject
   (attachments only) is not held. A title is never sent alone.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
@@ -91,7 +92,11 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
 - **The title is assessed with the text** (the shared rule of the Minos plugins): the first
   post of a topic is sent as the topic's title, decoded as a reader sees it, a blank line and
   the post's text, all within the 3000 characters; a reply as its own subject and its text,
-  only when the author changed phpBB's default "Re: <title>". A title alone is never sent.
+  only when the author changed phpBB's default "Re: <title>". A title alone is never sent:
+  a post that carries a title (every new topic; a reply with a subject of its own, read
+  from `post_data['post_subject']` and `data['topic_title']` of
+  `core.posting_modify_submit_post_before`) but has no text to assess, such as `[b] [/b]`,
+  is held and gets the failure mode at once, as one with only a link does.
   Each attempt reads the title from the topic, and `sent_md5` covers it, so a title changed
   while the post waits is a new revision (an edit) or a verdict that no longer applies. A
   masked text that touches the title (or the blank line) holds the post: the extension never

@@ -27,12 +27,13 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
  * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
- * posts with neither text to assess nor a link (attachments only); and everything while the
- * extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
+ * replies with neither text to assess, a link nor a subject of their own (attachments only);
+ * and everything while the extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
  * address), it holds new posts and gives them the failure mode at once (the plugins' shared
- * rule D9.12). A post with a link but no text to assess is held and goes to the failure
- * mode at once, without a request (the plugins' shared rule D9.5): a link, even one with a
- * blank text, never passes unassessed, and a title is never sent alone. Switched off, the
+ * rule D9.12). A post with a link or a title (a new topic, a reply's own subject) but no text
+ * to assess is held and goes to the failure mode at once, without a request (the plugins'
+ * shared rule D9.5): a link, even one with a blank text, and a title never pass unassessed,
+ * and a title is never sent alone. Switched off, the
  * extension does nothing at all: an edit of a post it held is not sent either, and the post
  * waits for a moderator.
  *
@@ -103,7 +104,7 @@ class listener implements EventSubscriberInterface
 	/**
 	 * Puts a new post into the approval queue while it is assessed.
 	 *
-	 * @param \phpbb\event\data $event `mode`, `data`, `forum_id`, `post_id`.
+	 * @param \phpbb\event\data $event `mode`, `data`, `post_data`, `forum_id`, `post_id`.
 	 * @return void
 	 */
 	public function hold_for_assessment($event)
@@ -132,7 +133,8 @@ class listener implements EventSubscriberInterface
 			return;
 		}
 
-		if (!in_array($mode, array('post', 'reply', 'quote'), true) || !$this->should_hold($data, $forum_id))
+		$post_data = isset($event['post_data']) ? (array) $event['post_data'] : array();
+		if (!in_array($mode, array('post', 'reply', 'quote'), true) || !$this->should_hold($data, $post_data, $mode, $forum_id))
 		{
 			return;
 		}
@@ -232,11 +234,15 @@ class listener implements EventSubscriberInterface
 	/**
 	 * Whether a new post is to be held and assessed.
 	 *
-	 * @param array<string,mixed> $data     phpBB's post data.
-	 * @param int                 $forum_id The forum.
+	 * @param array<string,mixed> $data      phpBB's post data going to be stored (`message`, and
+	 *     `topic_title`: the topic's, or for a new topic the subject typed).
+	 * @param array<string,mixed> $post_data phpBB's post data of the form (`post_subject`: the
+	 *     subject typed).
+	 * @param string              $mode      `post`, `reply` or `quote`.
+	 * @param int                 $forum_id  The forum.
 	 * @return bool
 	 */
-	protected function should_hold(array $data, $forum_id)
+	protected function should_hold(array $data, array $post_data, $mode, $forum_id)
 	{
 		if (!$this->settings->enabled() || !$this->settings->applies_to_forum($forum_id))
 		{
@@ -255,7 +261,10 @@ class listener implements EventSubscriberInterface
 			return false;
 		}
 		$message = isset($data['message']) ? (string) $data['message'] : '';
-		return $this->forum->plain_text($message) !== '' || forum::has_link($message);
+		$subject = isset($post_data['post_subject']) ? (string) $post_data['post_subject'] : '';
+		$topic_title = (isset($data['topic_title']) && (string) $data['topic_title'] !== '') ? (string) $data['topic_title'] : $subject;
+		return $this->forum->plain_text($message) !== '' || forum::has_link($message)
+			|| forum::own_title($topic_title, $subject, $mode === 'post') !== '';
 	}
 
 	/**

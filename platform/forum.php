@@ -249,12 +249,29 @@ class forum
 	 */
 	public function title_of(array $post)
 	{
-		$topic_title = isset($post['topic_title']) ? self::decoded_line((string) $post['topic_title']) : '';
-		if ((int) $post['post_id'] === (int) $post['topic_first_post_id'])
+		return self::own_title(isset($post['topic_title']) ? (string) $post['topic_title'] : '',
+			isset($post['post_subject']) ? (string) $post['post_subject'] : '',
+			(int) $post['post_id'] === (int) $post['topic_first_post_id']);
+	}
+
+	/**
+	 * {@see title_of} from the stored values, also before the post is stored: the topic's
+	 * title for the first post of a topic; for a reply, its own subject unless it is phpBB's
+	 * default ("Re: " and the topic's title) or the topic's title itself.
+	 *
+	 * @param string $topic_title The topic's title, as phpBB stores it.
+	 * @param string $subject     The post's subject, as phpBB stores it.
+	 * @param bool   $first_post  Whether the post opens the topic.
+	 * @return string The title, decoded and trimmed, or '' for none.
+	 */
+	public static function own_title($topic_title, $subject, $first_post)
+	{
+		$topic_title = self::decoded_line((string) $topic_title);
+		if ($first_post)
 		{
 			return $topic_title;
 		}
-		$subject = isset($post['post_subject']) ? self::decoded_line((string) $post['post_subject']) : '';
+		$subject = self::decoded_line((string) $subject);
 		$default = ((strpos($topic_title, self::REPLY_PREFIX) === 0) ? '' : self::REPLY_PREFIX) . $topic_title;
 		return ($subject === $default || $subject === $topic_title) ? '' : $subject;
 	}

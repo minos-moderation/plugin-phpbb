@@ -57,6 +57,8 @@ $corpus = array(
 	'smilies'              => 'Wesoło :) i bardzo :D koniec',
 	'image'                => 'Obrazek [img]https://example.org/a.png[/img] koniec',
 	'plain-lines'          => "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\"",
+	'blank-bold'           => '[b] [/b]',
+	'empty-italic'         => '[i][/i]',
 );
 
 define('IN_PHPBB', true);

@@ -88,6 +88,8 @@ final class RealFormatterFixtureTest extends TestCase
 			'smilies'              => array('smilies', 'Wesoło :) i bardzo :D koniec'),
 			'an image'             => array('image', 'Obrazek https://example.org/a.png koniec'),
 			'plain lines'          => array('plain-lines', "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""),
+			'bold around a blank'  => array('blank-bold', ''),
+			'empty italics'        => array('empty-italic', ''),
 		);
 	}
 

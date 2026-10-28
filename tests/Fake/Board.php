@@ -202,12 +202,27 @@ class Board
 	{
 		$forum_id = isset($options['forum_id']) ? $options['forum_id'] : self::FORUM;
 		$xml = isset($options['xml']) ? $options['xml'] : $this->xml($text);
+		// What posting.php passes: the subject typed (`post_data`), and the topic's title, or a
+		// new topic's subject (`data`).
+		if (empty($options['topic_id']))
+		{
+			$options['title'] = isset($options['title']) ? $options['title'] : 'Temat testowy ' . $this->next_topic;
+			$topic_title = $options['title'];
+			$subject = $options['title'];
+		}
+		else
+		{
+			$topic_title = $this->topic_title((int) $options['topic_id']);
+			$options['subject'] = isset($options['subject']) ? $options['subject'] : 'Re: ' . $topic_title;
+			$subject = $options['subject'];
+		}
 		$before = new \phpbb\event\data(array(
-			'mode'     => $mode,
-			'data'     => (isset($options['data']) ? $options['data'] : array()) + array('message' => $xml, 'forum_id' => $forum_id),
-			'forum_id' => $forum_id,
-			'post_id'  => 0,
-			'topic_id' => isset($options['topic_id']) ? $options['topic_id'] : 0,
+			'mode'      => $mode,
+			'data'      => (isset($options['data']) ? $options['data'] : array()) + array('message' => $xml, 'forum_id' => $forum_id, 'topic_title' => $topic_title),
+			'post_data' => array('post_subject' => $subject),
+			'forum_id'  => $forum_id,
+			'post_id'   => 0,
+			'topic_id'  => isset($options['topic_id']) ? $options['topic_id'] : 0,
 		));
 		$this->listener->hold_for_assessment($before);
 		$data = $before['data'];
@@ -318,6 +333,20 @@ class Board
 	}
 
 	/**
+	 * The stored title of a topic (HTML-escaped, as phpBB stores it).
+	 *
+	 * @param int $topic_id
+	 * @return string '' for no such topic.
+	 */
+	public function topic_title($topic_id)
+	{
+		$result = $this->db->sql_query('SELECT topic_title FROM ' . self::PREFIX . 'topics WHERE topic_id = ' . (int) $topic_id);
+		$topic = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $topic ? (string) $topic['topic_title'] : '';
+	}
+
+	/**
 	 * The stored title of a post's topic (HTML-escaped, as phpBB stores it).
 	 *
 	 * @param int $post_id
@@ -379,10 +408,7 @@ class Board
 		}
 		else
 		{
-			$result = $this->db->sql_query('SELECT topic_title FROM ' . self::PREFIX . 'topics WHERE topic_id = ' . $topic_id);
-			$topic = $this->db->sql_fetchrow($result);
-			$this->db->sql_freeresult($result);
-			$subject = isset($options['subject']) ? (string) $options['subject'] : 'Re: ' . ($topic ? (string) $topic['topic_title'] : '');
+			$subject = isset($options['subject']) ? (string) $options['subject'] : 'Re: ' . $this->topic_title($topic_id);
 		}
 		$this->db->sql_query('INSERT INTO ' . self::PREFIX . 'posts ' . $this->db->sql_build_array('INSERT', array(
 			'topic_id'        => $topic_id,

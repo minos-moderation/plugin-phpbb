@@ -171,16 +171,82 @@ final class ListenerTest extends TestCase
 		self::assertSame(array(), $this->gateway->requests);
 	}
 
-	public function testAPostWithNothingToAssessIsNotHeld(): void
+	public function testAReplyWithNothingToAssessIsNotHeld(): void
 	{
-		// No text and no link (attachments only, or formatting around nothing): nothing a
-		// reader could see, nothing to hold; the title alone is never sent.
-		$xml = '<r><B><s>[b]</s><e>[/b]</e></B> </r>';
-
-		$posted = $this->board->posting('', 'post', array('xml' => $xml));
+		// No text, no link, no subject of its own (attachments only, or formatting around
+		// nothing, as phpBB 3.3 stores `[b] [/b]`): nothing a reader could see, nothing to hold.
+		$posted = $this->board->posting('', 'reply', array('xml' => self::stored('blank-bold'), 'topic_id' => $this->topic()));
 
 		self::assertSame(ITEM_APPROVED, $posted['visibility']);
+		self::assertNull($this->board->row($posted['post_id']));
 		self::assertSame(array(), $this->gateway->requests);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public function titlesWithoutText(): array
+	{
+		$cases = array();
+		foreach (array('blank-bold', 'empty-italic') as $body)
+		{
+			foreach (array('post', 'reply') as $kind)
+			{
+				foreach (array(settings::FAIL_CLOSED, settings::FAIL_OPEN) as $mode)
+				{
+					$cases[$kind . ', ' . $body . ', ' . $mode] = array($kind, $body, $mode);
+				}
+			}
+		}
+		return $cases;
+	}
+
+	/**
+	 * @dataProvider titlesWithoutText
+	 */
+	public function testATitleOverNoTextToAssessGoesToTheFailureModeAtOnce(string $kind, string $body, string $mode): void
+	{
+		// Review of S6a: a new topic (or a reply under a subject of its own) whose post has no
+		// text a reader sees was published at once, and its title never reached the gateway.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$options = ($kind === 'post')
+			? array('xml' => self::stored($body), 'title' => 'Obraźliwy tytuł testowy')
+			: array('xml' => self::stored($body), 'topic_id' => $this->topic(), 'subject' => 'Obraźliwy temat odpowiedzi');
+
+		$id = $this->board->posting('', $kind, $options)['post_id'];
+
+		$row = $this->board->row($id);
+		self::assertSame(array(), $this->gateway->requests, 'a title is never sent alone');
+		self::assertSame('empty_text', $row['error_code']);
+		if ($mode === settings::FAIL_OPEN)
+		{
+			self::assertSame(array(ITEM_APPROVED, pending_store::PUBLISHED), array((int) $this->board->post($id)['post_visibility'], $row['status']));
+			self::assertGreaterThan(0, (int) $row['approved_at'], 'marked as a fail-open publication');
+			return;
+		}
+		self::assertSame(array(ITEM_UNAPPROVED, pending_store::HELD), array((int) $this->board->post($id)['post_visibility'], $row['status']));
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertSame('Minos: brak tekstu do oceny', $details['post_data']['MINOS_STATUS']);
+	}
+
+	/**
+	 * What phpBB 3.3 stores for a recorded text (tests/fixtures/phpbb-3.3/).
+	 */
+	private static function stored(string $name): string
+	{
+		$fixture = json_decode((string) file_get_contents(__DIR__ . '/../fixtures/phpbb-3.3/' . $name . '.json'), true);
+		self::assertIsArray($fixture, $name);
+		return (string) $fixture['xml'];
+	}
+
+	/**
+	 * An approved topic by someone the extension does not hold, for replies.
+	 */
+	private function topic(): int
+	{
+		$first = $this->board->write_post($this->board->xml('Pierwszy wpis tematu.'), ITEM_APPROVED, array('title' => 'Wątek testowy'));
+		return (int) $this->board->post($first)['topic_id'];
 	}
 
 	/**

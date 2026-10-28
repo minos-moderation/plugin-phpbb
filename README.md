@@ -110,7 +110,8 @@ kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zas
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
 werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
-oceniła tylko początek długiego postu, post ma link, ale nie ma tekstu do oceny, albo
+oceniła tylko początek długiego postu, post ma link albo tytuł, ale nie ma tekstu do oceny,
+albo
 ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
 tryb awarii:
 
@@ -149,7 +150,7 @@ Do bramy trafia wyłącznie:
   `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
   tytułem tematu i pustym wierszem (tytuł mieści się w tych 3000 znakach); odpowiedź —
   własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam tytuł, bez tekstu postu, nie
-  jest wysyłany;
+  jest wysyłany: taki post obsługuje od razu tryb awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
@@ -169,11 +170,13 @@ przekierowaniem.
   pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
   wysyłany, bo werdykt niczego by nie zmienił;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- postów bez tekstu do oceny i bez linku (np. z samymi załącznikami; sam cytat jest zwykłym
-  postem: zostaje wstrzymany i oceniony). Post z linkiem, ale bez tekstu do oceny (także
-  link z pustym, niewidocznym opisem), jest wstrzymywany i od razu obsługuje go tryb awarii,
-  bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do
-  oceny”. Sam tytuł tematu nigdy nie jest wysyłany;
+- odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
+  załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z
+  linkiem albo z tytułem (każdy nowy temat, odpowiedź z własnym tematem), ale bez tekstu do
+  oceny — także z samym formatowaniem wokół spacji, np. `[b] [/b]`, albo z linkiem o pustym,
+  niewidocznym opisie — jest wstrzymywany i od razu obsługuje go tryb awarii, bez wysyłania
+  czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”. Sam tytuł
+  nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
 - wszystkich postów, gdy ocenianie jest wyłączone (gdy jest włączone, ale brakuje klucza,
   sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
