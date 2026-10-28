@@ -68,6 +68,11 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   waits for a human. An unrecognised stored value reads as fail-closed too.
 - **Switched off, the extension does nothing**: the webhook answers `404` before reading
   anything, nothing is sent, the cron task is not runnable. Held posts wait for moderators.
+- **A link without text to assess is the failure mode** (the plugins' shared rule D9.5): a
+  post whose text is empty but which holds a link (`<URL>`, also with a blank text a reader
+  cannot see) is held and gets the failure mode at once, without a request; the MCP notes
+  "brak tekstu do oceny" (`error_code` `empty_text`). A post with neither text nor a link
+  (attachments only) is not held. A title is never sent alone.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
   moderators and not sent: nothing would be done with its verdict.
@@ -139,7 +144,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the gateway's pause (daily limit, overload) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
-| `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
+| `tests/Posting` | Which posts are held (a link without text: the failure mode at once); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body). |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |

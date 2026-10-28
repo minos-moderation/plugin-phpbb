@@ -47,6 +47,9 @@ class forum
 	/** What phpBB puts before the topic's title in a reply's default subject. */
 	const REPLY_PREFIX = 'Re: ';
 
+	/** A link in phpBB's stored XML (a `[url]` or an automatic link). */
+	const LINK_PATTERN = '#<URL[\s>]#';
+
 	/** The most `meta.link_domains` the gateway keeps. */
 	const MAX_LINK_DOMAINS = 10;
 
@@ -379,7 +382,7 @@ class forum
 			}
 		}
 		$meta = array(
-			'links'        => min(self::MAX_LINKS, (int) preg_match_all('#<URL[\s>]#', $xml)),
+			'links'        => min(self::MAX_LINKS, (int) preg_match_all(self::LINK_PATTERN, $xml)),
 			'link_domains' => array_values($domains),
 		);
 		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
@@ -388,6 +391,17 @@ class forum
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
+	}
+
+	/**
+	 * Whether a stored text holds a link - also one a reader cannot see, with a blank text.
+	 *
+	 * @param string $xml The stored text (`post_text`).
+	 * @return bool
+	 */
+	public static function has_link($xml)
+	{
+		return (bool) preg_match(self::LINK_PATTERN, (string) $xml);
 	}
 
 	/**

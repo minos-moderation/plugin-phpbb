@@ -126,12 +126,54 @@ final class ListenerTest extends TestCase
 
 	public function testAPostWithNothingToAssessIsNotHeld(): void
 	{
+		// No text and no link (attachments only, or formatting around nothing): nothing a
+		// reader could see, nothing to hold; the title alone is never sent.
 		$xml = '<r><B><s>[b]</s><e>[/b]</e></B> </r>';
 
 		$posted = $this->board->posting('', 'post', array('xml' => $xml));
 
 		self::assertSame(ITEM_APPROVED, $posted['visibility']);
 		self::assertSame(array(), $this->gateway->requests);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:int,2:string}>
+	 */
+	public function failureModes(): array
+	{
+		return array(
+			'fail-closed' => array(settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD),
+			'fail-open'   => array(settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED),
+		);
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testAPostWithALinkButNoTextToAssessGoesToTheFailureModeAtOnce(string $mode, int $visibility, string $status): void
+	{
+		// Audit probe B P5, the other way round: a link with a blank text, which a reader does
+		// not even see, was published at once and unassessed, also with fail-closed.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$xml = '<r><URL url="https://kasyno.example/bonus"><s>[url=https://kasyno.example/bonus]</s> <e>[/url]</e></URL></r>';
+
+		$id = $this->board->posting('', 'post', array('xml' => $xml))['post_id'];
+
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame($status, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->gateway->requests, 'nothing to assess: no request, and never the title alone');
+		if ($mode === settings::FAIL_OPEN)
+		{
+			self::assertGreaterThan(0, (int) $this->board->row($id)['approved_at'], 'marked as a fail-open publication');
+			self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_PUBLISHED_FAIL_OPEN'));
+			return;
+		}
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertSame('Minos: brak tekstu do oceny', $details['post_data']['MINOS_STATUS'], 'the moderator sees why');
+		$event = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
+		$this->board->listener->mark_queue_row($event);
+		self::assertSame('[Minos: brak tekstu do oceny] Temat', $event['post_row']['POST_SUBJECT']);
 	}
 
 	public function testAnEditOfAWaitingPostIsAssessedAgainUnderANewRevision(): void

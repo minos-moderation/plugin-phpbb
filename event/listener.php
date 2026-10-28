@@ -27,9 +27,12 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
  * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
- * posts without text to assess (only a quote, an image); and everything while the
- * extension is off or not configured. Switched off, the extension does nothing at all: an
- * edit of a post it held is not sent either, and the post waits for a moderator.
+ * posts with neither text to assess nor a link (attachments only); and everything while the
+ * extension is off or not configured. A post with a link but no text to assess is held and
+ * goes to the failure mode at once, without a request (the plugins' shared rule D9.5): a
+ * link, even one with a blank text, never passes unassessed, and a title is never sent
+ * alone. Switched off, the extension does nothing at all: an edit of a post it held is not
+ * sent either, and the post waits for a moderator.
  *
  * MCP: the approval queue marks the posts the extension holds, and a post's details show
  * the outcome, including the gateway's call for support (`wsparcie`).
@@ -249,7 +252,8 @@ class listener implements EventSubscriberInterface
 		{
 			return false;
 		}
-		return $this->forum->plain_text(isset($data['message']) ? (string) $data['message'] : '') !== '';
+		$message = isset($data['message']) ? (string) $data['message'] : '';
+		return $this->forum->plain_text($message) !== '' || forum::has_link($message);
 	}
 
 	/**
@@ -263,6 +267,10 @@ class listener implements EventSubscriberInterface
 		if (in_array($pending['status'], pending_store::UNSETTLED, true))
 		{
 			return 'MINOS_MCP_WAITING';
+		}
+		if ($pending['error_code'] === submitter::ERROR_EMPTY)
+		{
+			return 'MINOS_MCP_NO_TEXT';
 		}
 		return ($pending['verdict'] !== '') ? 'MINOS_MCP_VERDICT_' . strtoupper((string) $pending['verdict']) : 'MINOS_MCP_HANDLED';
 	}

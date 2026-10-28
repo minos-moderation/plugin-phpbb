@@ -37,6 +37,7 @@ $lang = array_merge($lang, array(
 	'MINOS_MCP_VERDICT_NIEOCENIONE'      => 'Minos: nieocenione',
 	'MINOS_MCP_VERDICT_TIMEOUT'          => 'Minos: brak werdyktu na czas',
 	'MINOS_MCP_VERDICT_REFUSED'          => 'Minos: błąd konfiguracji',
+	'MINOS_MCP_NO_TEXT'                  => 'Minos: brak tekstu do oceny',
 	'MINOS_MCP_SUPPORT'                  => 'potrzebne wsparcie',
 	'MINOS_MCP_TRUNCATED'                => 'oceniono 3000 pierwszych znaków',
 	'MINOS_MCP_MASK_MANUAL'              => 'Zamaskowany tekst wymaga ręcznego zastosowania.',

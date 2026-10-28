@@ -108,8 +108,9 @@ kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zas
 ## Tryb awarii
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
-werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji
-albo oceniła tylko początek długiego postu — decyduje tryb awarii:
+werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
+oceniła tylko początek długiego postu albo post ma link, ale nie ma tekstu do oceny —
+decyduje tryb awarii:
 
 - **fail-closed** (domyślnie): post zostaje w kolejce do zatwierdzenia i czeka na
   moderatora; w panelu moderatora widać, dlaczego.
@@ -166,8 +167,11 @@ przekierowaniem.
   pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
   wysyłany, bo werdykt niczego by nie zmienił;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- postów bez żadnego tekstu do oceny (sam cytat jest zwykłym postem: zostaje wstrzymany i
-  oceniony);
+- postów bez tekstu do oceny i bez linku (np. z samymi załącznikami; sam cytat jest zwykłym
+  postem: zostaje wstrzymany i oceniony). Post z linkiem, ale bez tekstu do oceny (także
+  link z pustym, niewidocznym opisem), jest wstrzymywany i od razu obsługuje go tryb awarii,
+  bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do
+  oceny”. Sam tytuł tematu nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
 - wszystkich postów, gdy ocenianie jest wyłączone albo brakuje klucza, sekretu lub adresu.
 

@@ -183,7 +183,8 @@ class submitter
 		$text = forum::first_chars($this->forum->text_of($post));
 		if ($text === '')
 		{
-			// Edited down to nothing assessable while it waited (a title alone is never sent).
+			// Nothing to assess: a post with only a link (the failure mode at once, shared rule
+			// D9.5), or one edited down to nothing while it waited. A title alone is never sent.
 			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
 			return null;
 		}
