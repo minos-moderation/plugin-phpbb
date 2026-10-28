@@ -206,16 +206,21 @@ class moderation_test extends \phpbb_functional_test_case
 		$delivery = json_encode(array('id' => 'phpbb:' . $post_id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne',
 			'kategorie' => array(), 'ocenzurowany' => null, 'wsparcie' => false, 'wersja' => '0000000000000000'));
 
-		// The board disabled by its administrator ("Disable board").
+		// The board disabled by its administrator ("Disable board"): the webhook stays open
+		// (event/webhook_access.php), the verdict is applied, readers see the board disabled.
 		$this->set_config('board_disable', '1');
 		$answer = $this->deliver($delivery);
-		$this->set_config('board_disable', '0');
 		$this->record('board disabled', $answer);
-		// What the README says: phpBB's own "board disabled" page with 200, before any route
-		// runs, so the gateway takes the verdict as delivered.
-		$this->assertSame(200, $answer['status']);
-		$this->assertStringContainsString('text/html', $answer['type']);
-		$this->assertSame('pending', $this->row($post_id)['status'], 'the board disabled applies no verdict');
+		$this->assertSame(array(200, ''), array($answer['status'], $answer['body']), 'the controller\'s answer, not phpBB\'s page');
+		$this->assertSame('published', $this->row($post_id)['status'], 'the verdict is applied');
+		$this->assertSame(ITEM_APPROVED, $this->visibility($post_id));
+		$this->assertStringContainsString($this->lang('BOARD_DISABLE'), self::request('GET', 'index.php', array(), false)->text(), 'only the webhook passes');
+		$this->set_config('board_disable', '0');
+
+		// A second post for the rest: the first one is settled.
+		$post_id = $this->post_as_author('Minos test off 2', 'Kolejny testowy wpis czekający na werdykt.');
+		$delivery = json_encode(array('id' => 'phpbb:' . $post_id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne',
+			'kategorie' => array(), 'ocenzurowany' => null, 'wsparcie' => false, 'wersja' => '0000000000000000'));
 
 		// The assessment switched off in the extension's settings.
 		$this->configure(false);

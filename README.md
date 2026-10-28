@@ -323,14 +323,20 @@ postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuj
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
 **Wyłączenie forum** (w panelu administracji „Wyłącz forum”, a także forum wyłączone przez
-phpBB po przekroczeniu limitu obciążenia) działa inaczej: phpBB na każde żądanie — także na
-doręczenie werdyktu pod adres webhooka — odpowiada stroną „forum wyłączone” z kodem `200`,
-zanim rozszerzenie je zobaczy. Brama uznaje wtedy werdykt za doręczony i go nie ponawia:
-werdykt przepada, a post czeka do końca czasu oczekiwania i obsługuje go tryb awarii
-(fail-closed: zostaje w kolejce dla moderatora). Tak odpowiada prawdziwe forum phpBB 3.3 w
-teście (zadanie `phpbb-functional` w CI). Na czas prac przy forum lepiej wyłączyć ocenianie w
-ustawieniach rozszerzenia: webhook odpowiada wtedy `404`, brama ponawia doręczenie, a po
-ponownym włączeniu oceniania czekające posty są oceniane od nowa.
+phpBB po przekroczeniu limitu obciążenia) nie zatrzymuje oceniania: adres webhooka zostaje
+otwarty (wyłącznie on — każda inna strona pokazuje gościom „forum wyłączone”), więc werdykty
+przychodzą i są stosowane jak decyzje moderatora, a czytelnicy zobaczą ich skutek po ponownym
+włączeniu forum. Bez tego phpBB odpowiadałby na doręczenie stroną „forum wyłączone” z kodem
+`200`, brama uznałaby werdykt za doręczony, a werdykt by przepadł. Sprawdza to test na
+prawdziwym forum phpBB 3.3 (zadanie `phpbb-functional` w CI).
+
+Wyjątek: w czasie **aktualizacji phpBB** (katalog `install/` na serwerze) phpBB odpowiada na
+każde żądanie, także na doręczenie werdyktu, stroną „forum wyłączone” z kodem `200`, zanim
+rozszerzenie je zobaczy. Brama uznaje wtedy werdykt za doręczony i go nie ponawia: werdykt
+przepada, a post czeka do końca czasu oczekiwania i obsługuje go tryb awarii (fail-closed:
+zostaje w kolejce dla moderatora). Na czas aktualizacji phpBB wyłącz ocenianie w ustawieniach
+rozszerzenia: webhook odpowiada wtedy `404`, brama ponawia doręczenie, a po ponownym włączeniu
+oceniania czekające posty są oceniane od nowa.
 
 ## Usunięcie rozszerzenia
 

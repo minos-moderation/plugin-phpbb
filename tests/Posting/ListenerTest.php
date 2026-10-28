@@ -3,6 +3,7 @@
 namespace minos\moderation\tests\Posting;
 
 use minos\moderation\event\listener;
+use minos\moderation\event\webhook_access;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\tests\Fake\Board;
@@ -39,6 +40,8 @@ final class ListenerTest extends TestCase
 		{
 			self::assertTrue(method_exists(listener::class, $method), $method);
 		}
+		// And the webhook's way past a disabled board (tests/Receiver/WebhookAccessTest.php).
+		self::assertSame(array('core.user_setup'), array_keys(webhook_access::getSubscribedEvents()));
 	}
 
 	/**

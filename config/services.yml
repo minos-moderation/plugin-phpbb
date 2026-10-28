@@ -77,6 +77,14 @@ services:
         tags:
             - { name: event.listener }
 
+    minos.moderation.webhook_access:
+        class: minos\moderation\event\webhook_access
+        arguments:
+            - '@symfony_request'
+            - '@config'
+        tags:
+            - { name: event.listener }
+
     minos.moderation.acp_notice:
         class: minos\moderation\event\acp_notice
         arguments:

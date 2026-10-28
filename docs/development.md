@@ -13,6 +13,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `ext.php` | Refuses to be enabled without phpBB 3.3, PHP 7.4, cURL or the bundled client. |
 | `client_loader.php` | Loads `Minos\Client` from the bundled `vendor/` (see "Composer"). |
 | `config/services.yml`, `config/routing.yml` | The services; the `POST /minos/webhook` route. |
+| `event/webhook_access.php` | The webhook only: past a disabled or overloaded board (`core.user_setup`). |
 | `event/acp_notice.php`, `adm/style/event/` | Every ACP page: what is missing while the extension is switched on without a usable configuration. |
 | `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. Notifications: keeps phpBB's "in the queue" notice of a held post on the board only. |
 | `service/submitter.php`, `service/curl_transport.php` | `POST /api/v1/b2b/oceny` and every class of answer. |
@@ -82,6 +83,20 @@ decision).
   revision, queued with a fresh time-out (`pending_store::restart_waiting`; the plugins'
   shared rule D9.13). Re-enabled in the extension manager with the setting left on, the cron
   task resumes where it stopped (overdue rows get the failure mode).
+- **A disabled board still takes the gateway's deliveries** (review of #7, C-45). phpBB
+  answers a guest on a disabled board (`board_disable`) or over its load limit (`limit_load`)
+  with its own page and `200` before any route runs, which the gateway takes as delivered: the
+  verdict would be lost. `event/webhook_access.php`, on `core.user_setup` (triggered before
+  both checks), for `POST /minos/webhook` only (`getPathInfo()` of phpBB's `symfony_request`,
+  the same with or without `app.php`), defines `SKIP_CHECK_DISABLED` - phpBB's own way past the
+  disabled board, as `ucp.php` and `memberlist.php` use it - and sets `limit_load` to `0` in
+  memory for that request (phpBB itself sets `board_disable` in memory there). The verdict is
+  applied as a moderator would apply it; readers see nothing until the board is enabled. No
+  other route or method passes (`tests/Receiver/WebhookAccessTest.php`, each case in its own
+  process; the live board's suite). Not covered, and written in the README: phpBB's check for
+  its `install/` directory (an update of phpBB in progress, `allow_install_dir` off), which
+  answers the same `200` page and respects no constant the extension may define; the README
+  advises switching the assessment off for an update of phpBB.
 - **Switched on without a usable configuration, the failure mode** (shared rule D9.12): with
   no key, no secret or no usable gateway address, new posts are held as usual and get the
   failure mode at once (`refused`, `not_configured`), without a request; every ACP page says
@@ -258,7 +273,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `WebhookAccessTest`: `POST /minos/webhook` passes a disabled and an overloaded board, no other path or method does. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing; a bare or `[url]` address is text). |
 | `tests/Posting` | Which posts are held (every post covered; one without text to assess - each F7 fixture of the real formatter, in both modes - the failure mode at once and no request; an address a reader sees sent with its link; an image's title beside text only; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
@@ -333,10 +348,12 @@ phpBB/vendor/bin/phpunit -c phpBB/ext/minos/moderation/phpunit.functional.xml.di
 What the live board showed (2026-10-28, phpBB 3.3.19 at `6c75df1`, PHP 8.3, MySQL 8.0):
 
 - **The webhook while the board is disabled** (ACP "Disable board", also a board over its
-  load limit): `app.php` answers `200` with phpBB's "board disabled" page before any route
-  runs (`user::setup()` -> `trigger_error()`), so the gateway takes the delivery as done and
-  does not retry; the verdict is lost, and the post waits for its time-out and the failure
-  mode. The README says so. (A bot gets `503`; the gateway is not a bot.)
+  load limit): `app.php` answered `200` with phpBB's "board disabled" page before any route
+  ran (`user::setup()` -> `trigger_error()`), so the gateway took the delivery as done and the
+  verdict was lost (a bot gets `503`; the gateway is not one). Since the review of #7,
+  `event/webhook_access.php` keeps the webhook open (see "Decisions worth knowing"); the suite
+  delivers to a disabled board and sees `200` with the controller's empty body, the verdict
+  applied and every other page still disabled.
 - **The webhook while the extension is disabled** in the extension manager: `404`, phpBB's
   HTML page (the route does not exist); the gateway retries until its TTL. Switched off in the
   extension's settings: `404` with an empty body, from the controller.
@@ -455,6 +472,11 @@ a `release` environment with a required reviewer on the `publish` job.
 Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75df1`
 (2026-09-28), which is what the stubs copy:
 
+- `core.user_setup` (triggered in `user::setup()`, `phpbb/user.php:232`, before the check of
+  `install/` (`:366`), of `board_disable` (`:382`, skipped when `SKIP_CHECK_DISABLED` is defined
+  or for admins and moderators) and of `limit_load` (`:393`, on `$config`, the `config`
+  service, whose `offsetSet()` changes the value in memory only); `app.php` calls
+  `setup('app')` before routing; `symfony_request::getPathInfo()` and `isMethod()`;
 - `core.adm_page_header` (triggered first in `adm_page_header()`, `includes/functions_acp.php`)
   and the ACP template event `acp_overall_header_body_before` (`adm/style/overall_header.html`,
   first thing in `<body>`), checked on 3.3.x at `6c75df1`;
