@@ -75,6 +75,15 @@ $corpus = array(
 	'link-label-shy'       => "[url=https://example.org/a]\u{00AD}[/url]",
 	'link-label-zwsp'      => "[url=https://example.org/a]\u{200B}[/url]",
 	'bold-zwsp'            => "[b]\u{200B}[/b]",
+	// A mark without its base letter (\p{M}), a control (\p{Cc}) and the blank fillers some
+	// scripts carry: no text either. A letter with its combining mark is text.
+	'image-cgj'            => "[img]https://example.org/a.png[/img]\u{034F}",
+	'image-vs16'           => "[img]https://example.org/a.png[/img]\u{FE0F}",
+	'image-c1-control'     => "[img]https://example.org/a.png[/img]\u{0081}",
+	'image-hangul-filler'  => "[img]https://example.org/a.png[/img]\u{3164}",
+	'image-braille-blank'  => "[img]https://example.org/a.png[/img]\u{2800}",
+	'link-label-cgj'       => "[url=https://example.org/a]\u{034F}[/url]",
+	'letter-combining-acute' => "e\u{0301}",
 	// The entity typed as text: phpBB shows it as typed, a visible text.
 	'typed-entity'         => '&#8203;',
 );

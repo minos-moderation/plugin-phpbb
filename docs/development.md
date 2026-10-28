@@ -121,10 +121,13 @@ decision).
   (`IMG`, also `[img=WxH]`, which phpBB stores as an `IMG`), an inline attachment
   (`ATTACHMENT`), a video (`FLASH`), a link with a blank label (`<URL>` whose text is blank),
   formatting around nothing, or a title alone (a new topic, a reply's own subject). Characters
-  a reader does not see count as nothing (`forum::is_blank`: white space, `\p{Z}` and the
-  format characters `\p{Cf}` - U+200B, U+00AD, U+2060, U+200E, ...), in the text, beside an
-  image, in a link's label and in a poll; a text the pattern cannot read (not UTF-8) is kept
-  and sent: more text, never less. The entity `&#8203;` typed as text stays visible text. Before
+  a reader does not see count as nothing (`forum::is_blank` with `forum::INVISIBLE`, the
+  set of the WordPress and MyBB plugins: white space, `\p{Z}`, the format characters `\p{Cf}`
+  - U+200B, U+00AD, U+2060, U+200E, ... -, the controls `\p{Cc}`, a mark without its base
+  letter `\p{M}` - U+034F, U+FE0F -, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the
+  blank Braille pattern U+2800), in the text, beside an image, in a link's label and in a
+  poll; a letter keeps its combining marks and is text ("e" + U+0301). A text the pattern
+  cannot read (not UTF-8) is kept and sent: more text, never less. The entity `&#8203;` typed as text stays visible text. Before
   F7 such a reply without a link or a title of its own was published unassessed, and an
   image went to the gateway as its address. A title is never sent alone; an address a reader
   sees (a bare one, `[url]X[/url]`) is text and is sent.
@@ -222,6 +225,16 @@ decision).
   post is held (`mask_manual`, the masked text shown to moderators). The update is checked
   and the text read back; otherwise everything rolls back and the post is held
   (`mask_failed`).
+- **`wsparcie` is never a removal** (the plugins' shared rule A7 of client-php's
+  `docs/plugin-behaviour.md`: an active signal for the moderators, never an automatic
+  removal). `verdict_applier::decide` takes the row's `support`: `zablokowane` with
+  `wsparcie` is `HOLD` whatever the "zablokowane" setting, so the post stays in the MCP queue
+  (marked "potrzebne wsparcie", with the note above its text), the moderators get the queue
+  e-mail once (`notify_queue`, as for every hold), and a late verdict for a post the failure
+  mode published takes it back to the queue (`return_to_queue`), never deletes it. The
+  moderator log has `LOG_MINOS_SUPPORT` beside the decision; nothing goes to the author. A
+  post published with `wsparcie` (`bezpieczne`, a mask) is not in the MCP queue: the signal is
+  the moderator log and the ACP list only (no report is raised; not done).
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an
   unapproved -> deleted change as if the post had been counted, lowering `user_posts` and
   `num_posts`; approve-then-delete inside one transaction keeps the counters right.
@@ -282,9 +295,9 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `WebhookAccessTest`: `POST` to `app.php/minos/webhook` (at the root or in a directory) passes a disabled and an overloaded board; no other script with that path (`viewtopic.php`, `index.php`, `posting.php`, `myapp.php`, the path left in the name), path or method does. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie` (also `zablokowane` with `wsparcie` under "delete": held, marked, never deleted - A7); a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict (a late block with `wsparcie` under "delete" back to the queue, A7), and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `WebhookAccessTest`: `POST` to `app.php/minos/webhook` (at the root or in a directory) passes a disabled and an overloaded board; no other script with that path (`viewtopic.php`, `index.php`, `posting.php`, `myapp.php`, the path left in the name), path or method does. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue (also a block with `wsparcie` under "delete"), phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
-| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing; a bare or `[url]` address is text). |
+| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing, also beside or labelled with only invisible characters - `\p{Cf}`, a lone mark, a control, a blank filler; a letter with its combining mark and a bare or `[url]` address are text). |
 | `tests/Posting` | Which posts are held (every post covered; one without text to assess - each F7 fixture of the real formatter, in both modes - the failure mode at once and no request; an address a reader sees sent with its link; an image's title beside text only; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
 | `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
@@ -314,8 +327,11 @@ it; the mock gateway runs from the repository's `vendor/` (`MINOS_MOCK_PATH`), w
 invented key and secret. Scenarios, in order on one board: enabling the extension (its
 table, every migration, starts switched off, the ACP page and the webhook URL); a post by a
 registered user (`f_noapprove` by phpBB's defaults) held, ONE item in the mock's queue, the
-mock's signed delivery through `app.php/minos/webhook` publishing it; a mask (the reader sees
-`██████`); `zablokowane` held, with the MCP queue's mark and details; a delivery signed with
+mock's signed delivery through `app.php/minos/webhook` publishing it; an image beside U+200B,
+and one beside a lone mark U+FE0F (which phpBB stores), held and sent nothing (F7); a mask (the reader sees
+`██████`); `zablokowane` held, with the MCP queue's mark and details; `zablokowane` with
+`wsparcie` under the "delete" setting held, never deleted, e-mailed once and marked
+"potrzebne wsparcie" in the MCP (A7); a delivery signed with
 another secret and one 301 s old refused with the same empty `401`, nothing applied, traced
 for the ACP (the clock named) and forgotten after the gateway's own delivery; the webhook while the
 board is disabled, the assessment switched off and the extension disabled; on a disabled

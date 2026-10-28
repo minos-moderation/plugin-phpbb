@@ -161,6 +161,18 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
 		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'fail-closed: for a moderator');
 		$this->assertSame(array(), $this->mock_queue(), 'nothing sent, not the title alone');
+
+		// A mark without its base letter (U+FE0F) is no text either, after phpBB's own input
+		// handling (NFC keeps it).
+		$post_id = $this->post_as_author('Minos test mark', "[img]https://example.org/a.png[/img]\u{FE0F}");
+
+		$db = $this->get_db();
+		$result = $db->sql_query('SELECT post_text FROM ' . POSTS_TABLE . ' WHERE post_id = ' . (int) $post_id);
+		$stored = (string) $db->sql_fetchfield('post_text');
+		$db->sql_freeresult($result);
+		$this->assertStringContainsString("\u{FE0F}", $stored, 'phpBB stored the mark');
+		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
+		$this->assertSame(array(), $this->mock_queue(), 'nothing sent');
 	}
 
 	public function test_a_masked_verdict_publishes_the_masked_text(): void
@@ -197,6 +209,30 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->logout();
 		$this->assertStringContainsString('[Minos: zablokowane] Minos test held', $queue);
 		$this->assertStringContainsString('Minos: zablokowane', $details);
+	}
+
+	public function test_a_blocked_post_with_support_is_held_never_deleted(): void
+	{
+		// The plugins' shared rule A7: `wsparcie` is a signal for the moderators, never an
+		// automatic removal, also under the setting that soft-deletes a blocked post.
+		$this->configure();
+		$this->set_config('minos_moderation_blocked', 'delete');
+		$this->subscribe_admin_to_queue_emails();
+
+		$post_id = $this->post_as_author('Minos test support', 'Testowy wpis [minos:blokuj] [minos:kategoria=samookaleczenie]');
+		$this->work();
+		$this->set_config('minos_moderation_blocked', 'hold');
+
+		$this->assertSame(array('held', '1'), array($this->row($post_id)['status'], (string) $this->row($post_id)['support']));
+		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'in the queue, not soft-deleted');
+		$this->assertSame(1, $this->queue_emails('Minos test support'), 'left to the moderators: one e-mail');
+
+		$this->login();
+		$queue = self::request('GET', 'mcp.php?i=queue&mode=unapproved_topics&sid=' . $this->sid)->filter('#main, #page-body')->text();
+		$details = self::request('GET', 'mcp.php?i=queue&mode=approve_details&p=' . $post_id . '&sid=' . $this->sid)->filter('#page-body')->text();
+		$this->logout();
+		$this->assertStringContainsString('[Minos: zablokowane, potrzebne wsparcie] Minos test support', $queue);
+		$this->assertStringContainsString('potrzebne wsparcie', $details);
 	}
 
 	public function test_a_forged_or_stale_delivery_is_refused_and_traced_for_the_acp(): void
