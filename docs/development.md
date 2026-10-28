@@ -164,6 +164,12 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
 
 CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file and a package build.
+Every action the workflows use is pinned to a full commit SHA with its version in a comment
+(`uses: owner/action@<40-hex sha>  # v1.2.3`), the same SHA in `tests.yml` and `release.yml`;
+to refresh a pin, resolve the release's tag to its commit (`git ls-remote
+https://github.com/<owner>/<action> refs/tags/<tag>`, the peeled `^{}` line for an annotated
+tag), check that the commit belongs to that release, and change the SHA and the comment
+together everywhere the action is used.
 
 ## Text fixtures
 
