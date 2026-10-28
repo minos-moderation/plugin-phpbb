@@ -696,7 +696,9 @@ class forum
 	 * While the extension assessed the post, phpBB's notification of its posting reached the
 	 * board only ({@see \minos\moderation\event\listener::hold_back_queue_messages}); it is
 	 * withdrawn and sent again, so phpBB - which skips a user it already notified about the
-	 * item - delivers it by every method each moderator chose.
+	 * item - delivers it by every method each moderator chose. Callers do this once per post
+	 * (`pending_store::mark_announced`): a second time would withdraw the board notice of a
+	 * moderator phpBB then skips for the e-mail it remembers.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
 	 * @return void

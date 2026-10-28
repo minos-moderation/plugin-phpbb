@@ -177,9 +177,11 @@ class listener implements EventSubscriberInterface
 		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now) : $this->store->create($post_id, $now);
 		if (!$queued)
 		{
-			// Nothing to assess it with: the moderators get phpBB's e-mail, held back for it.
+			// Nothing to assess it with: the moderators get phpBB's e-mail, held back for it
+			// (once, if the post has a row).
 			$post = $this->forum->load_post($post_id);
-			if ($post !== null && $this->forum->awaits_approval($post))
+			if ($post !== null && $this->forum->awaits_approval($post)
+				&& ($this->store->find($post_id) === null || $this->store->mark_announced($post_id)))
 			{
 				$this->forum->notify_queue($post);
 			}

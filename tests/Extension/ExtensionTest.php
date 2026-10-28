@@ -7,6 +7,7 @@ use minos\moderation\ext;
 use minos\moderation\migrations\gateway_pause;
 use minos\moderation\migrations\install_data;
 use minos\moderation\migrations\install_schema;
+use minos\moderation\migrations\queue_notice;
 use minos\moderation\migrations\shared_pause;
 use minos\moderation\migrations\user_groups;
 use minos\moderation\migrations\verdict_times;
@@ -89,6 +90,7 @@ final class ExtensionTest extends TestCase
 		self::assertSame(array(), $settings->group_ids(), 'every group, as before the setting');
 		self::assertSame(array('\minos\moderation\migrations\shared_pause'), user_groups::depends_on());
 		self::assertSame(array('\minos\moderation\migrations\user_groups'), verdict_times::depends_on());
+		self::assertSame(array('\minos\moderation\migrations\verdict_times'), queue_notice::depends_on());
 		self::assertNull($settings->pause(time()), 'no pause of the gateway yet');
 		self::assertTrue($pause->effectively_installed());
 		self::assertSame(array('\minos\moderation\migrations\install_data'), gateway_pause::depends_on());
@@ -105,6 +107,10 @@ final class ExtensionTest extends TestCase
 
 		self::assertSame(array('received_at' => array('TIMESTAMP', 0)), $migration->update_schema()['add_columns']['phpbb_minos_pending']);
 		self::assertSame(array('received_at'), $migration->revert_schema()['drop_columns']['phpbb_minos_pending']);
+
+		$notice = new queue_notice(new \phpbb\config\config(), new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		self::assertSame(array('announced' => array('BOOL', 0)), $notice->update_schema()['add_columns']['phpbb_minos_pending']);
+		self::assertSame(array('announced'), $notice->revert_schema()['drop_columns']['phpbb_minos_pending']);
 	}
 
 	public function testAnUnrecognisedStoredValueNeverPublishesByItself(): void

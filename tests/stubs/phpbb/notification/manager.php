@@ -70,6 +70,37 @@ class manager
 	}
 
 	/**
+	 * What a moderator's "mark all as read" does: the board's notifications stay (read), and
+	 * the e-mail method forgets whom it e-mailed (phpBB 3.3's `email::mark_notifications()`
+	 * deletes the `notification_emails` rows), so a notification added again would e-mail anew.
+	 *
+	 * @return void
+	 */
+	public function mark_all_read()
+	{
+		foreach (array_keys($this->notified) as $key)
+		{
+			if (strpos($key, self::EMAIL . ' ') === 0)
+			{
+				unset($this->notified[$key]);
+			}
+		}
+	}
+
+	/**
+	 * Whether a user has a notification about an item listed on the board.
+	 *
+	 * @param string $type
+	 * @param int    $item
+	 * @param int    $user
+	 * @return bool
+	 */
+	public function listed($type, $item, $user)
+	{
+		return isset($this->notified[self::BOARD . ' ' . $type . ' ' . (int) $item][(int) $user]);
+	}
+
+	/**
 	 * Deliveries of one kind.
 	 *
 	 * @param string $type

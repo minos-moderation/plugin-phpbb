@@ -7,6 +7,7 @@ use minos\moderation\cron\sweeper;
 use minos\moderation\event\deferred_verdicts;
 use minos\moderation\event\listener;
 use minos\moderation\migrations\install_schema;
+use minos\moderation\migrations\queue_notice;
 use minos\moderation\migrations\verdict_times;
 use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
@@ -581,20 +582,23 @@ class Board
 				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', (array) $key[1]) . ')');
 			}
 		}
-		$later = new verdict_times(new \phpbb\config\config(), $this->db, null, './', 'php', self::PREFIX);
-		$changes = $later->update_schema();
-		foreach ($changes['add_columns'] as $table => $columns)
+		foreach (array(verdict_times::class, queue_notice::class) as $class)
 		{
-			foreach ($columns as $name => $definition)
+			$later = new $class(new \phpbb\config\config(), $this->db, null, './', 'php', self::PREFIX);
+			$changes = $later->update_schema();
+			foreach ($changes['add_columns'] as $table => $columns)
 			{
-				$this->db->pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . self::column($name, $definition));
+				foreach ($columns as $name => $definition)
+				{
+					$this->db->pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . self::column($name, $definition));
+				}
 			}
-		}
-		foreach ($changes['add_index'] as $table => $indexes)
-		{
-			foreach ($indexes as $name => $columns)
+			foreach (isset($changes['add_index']) ? $changes['add_index'] : array() as $table => $indexes)
 			{
-				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', $columns) . ')');
+				foreach ($indexes as $name => $columns)
+				{
+					$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', $columns) . ')');
+				}
 			}
 		}
 	}

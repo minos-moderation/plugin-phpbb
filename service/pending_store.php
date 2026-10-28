@@ -232,6 +232,21 @@ class pending_store
 	}
 
 	/**
+	 * Claims the one announcement of a post the extension leaves in the queue: the moderators
+	 * are told once per post (`announced`), whatever happens to it afterwards - a late
+	 * verdict, an edit, the assessment switched off and on. New revisions keep the mark.
+	 *
+	 * @param int $post_id The post.
+	 * @return bool True the first time: the caller tells the moderators now.
+	 */
+	public function mark_announced($post_id)
+	{
+		$this->db->sql_query('UPDATE ' . $this->table . ' SET announced = 1
+			WHERE post_id = ' . (int) $post_id . ' AND announced = 0');
+		return $this->db->sql_affectedrows() === 1;
+	}
+
+	/**
 	 * Stores the digest of the text about to be sent, before the request leaves: a verdict may
 	 * come back before the gateway's `202` is handled, and must find it.
 	 *

@@ -109,7 +109,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    powiadomienie znika z listy, a e-mail nie wychodzi wcale. Gdy zostawi post w kolejce dla
    moderatora (werdykt, tryb awarii fail-closed, brak tekstu do oceny, post zmieniony w
    czasie oceny), moderatorzy dostają to powiadomienie jeszcze raz, tym razem także e-mailem
-   (jeśli mają je włączone) — jeden raz. O postach, których rozszerzenie nie wstrzymuje,
+   (jeśli mają je włączone) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
+   spóźniony werdykt, poprawka), powiadomienie zostaje na liście, a drugi e-mail nie wychodzi. O postach, których rozszerzenie nie wstrzymuje,
    phpBB powiadamia jak zwykle. Jeśli wyłączysz ocenianie w ustawieniach, gdy posty czekają
    na werdykt, moderatorzy dostają wtedy e-mail o każdym z nich (od tej chwili decydują o
    nich sami). Po wyłączeniu rozszerzenia w menedżerze rozszerzeń e-mail o nich nie wyjdzie:

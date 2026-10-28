@@ -25,7 +25,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `cron/sweeper.php` | Every 5 minutes: time-outs, retries, leftovers, pruning. |
 | `acp/`, `controller/acp.php`, `adm/style/` | The ACP page. |
 | `styles/all/template/event/` | The MCP note above a queued post. |
-| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`); the user groups (`user_groups`); the time a verdict arrived (`verdict_times`). |
+| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`); the user groups (`user_groups`); the time a verdict arrived (`verdict_times`); the moderators told once (`queue_notice`). |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 | `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
@@ -188,7 +188,11 @@ decision).
   to a moderator (`HELD`: a verdict, the fail-closed failure mode, no text to assess, or an
   outcome that no longer fits the post), `forum::notify_queue` withdraws the notice and adds
   it again, so phpBB - which skips a user already notified about the item by any method -
-  sends it by every method once. A post the extension publishes withdraws the notice
+  sends it by every method once. Once per post: the row's `announced` mark (migration
+  `queue_notice`, kept by every new revision) is claimed first (`mark_announced`), because a
+  second withdraw-and-add would remove the board notice of a moderator whom phpBB then skips
+  for the e-mail it remembers; a later hold (a late verdict, an edit, the assessment switched
+  off again) leaves the first notice listed and sends no second e-mail. A post the extension publishes withdraws the notice
   (`approve()`) and never e-mails. A post the extension does not hold keeps phpBB's own
   notification. Switched off in the ACP while posts wait, every post still in the queue gets
   its e-mail then (`controller/acp.php`, at most 1000); disabled in the extension manager,

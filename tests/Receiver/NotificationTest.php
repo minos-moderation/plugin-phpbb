@@ -226,6 +226,59 @@ final class NotificationTest extends TestCase
 		self::assertSame(1, $this->queue_emails(), 'once: phpBB remembers whom it e-mailed');
 	}
 
+	/**
+	 * @return array<string,array{0:callable}>
+	 */
+	public function secondHolds(): array
+	{
+		return array(
+			'a late verdict after the time-out holds it again' => array(static function (Board $board, int $id) {
+				$board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane'));
+			}),
+			'the author edits it and the new text is held' => array(static function (Board $board, int $id) {
+				$board->edit($id, 'Wpis po poprawce autora.');
+				$board->deliver(array('id' => 'phpbb:' . $id . '.1', 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane'));
+			}),
+		);
+	}
+
+	/**
+	 * @dataProvider secondHolds
+	 */
+	public function testAPostLeftInTheQueueAgainKeepsItsNoticeAndSendsNoSecondEmail(callable $again): void
+	{
+		// Review of #6, N2: telling the moderators again withdrew the board notice of one who
+		// also gets e-mails, and phpBB, remembering the e-mail, did not list it again.
+		$this->board->notifications->recipients = array(5 => array(self::BOARD, self::EMAIL), 6 => array(self::EMAIL), 8 => array(self::BOARD));
+		$id = $this->board->posting('Wpis bez werdyktu na czas.')['post_id'];
+		$topic = (int) $this->board->post($id)['topic_id'];
+		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
+		self::assertSame(2, $this->queue_emails(), 'held by the time-out: moderators 5 and 6 are e-mailed');
+		$this->board->notifications->mark_all_read();
+
+		$again($this->board, $id);
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(2, $this->queue_emails(), 'no second e-mail, even after "mark all as read"');
+		self::assertTrue($this->board->notifications->listed(self::TOPIC_IN_QUEUE, $topic, 5), 'still listed for the moderator with e-mails');
+		self::assertTrue($this->board->notifications->listed(self::TOPIC_IN_QUEUE, $topic, 8));
+	}
+
+	public function testSwitchedOffTwiceTheNoticeStaysListedAndIsEmailedOnce(): void
+	{
+		$this->board->notifications->recipients = array(5 => array(self::BOARD, self::EMAIL));
+		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
+		$topic = (int) $this->board->post($id)['topic_id'];
+
+		$this->save_assessment(false);
+		$this->board->notifications->mark_all_read();
+		$this->save_assessment(true);
+		$this->save_assessment(false);
+
+		self::assertSame(1, $this->queue_emails());
+		self::assertTrue($this->board->notifications->listed(self::TOPIC_IN_QUEUE, $topic, 5));
+	}
+
 	public function testAPostTheExtensionDoesNotHoldKeepsPhpbbsOwnEmail(): void
 	{
 		$this->board->auth->global['f_noapprove'] = false;

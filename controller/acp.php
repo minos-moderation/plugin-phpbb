@@ -314,7 +314,7 @@ class acp
 		foreach ($this->store->unsettled(self::NOTIFY_LIMIT) as $row)
 		{
 			$post = $this->forum->load_post((int) $row['post_id']);
-			if ($post !== null && $this->forum->awaits_approval($post))
+			if ($post !== null && $this->forum->awaits_approval($post) && $this->store->mark_announced((int) $row['post_id']))
 			{
 				$this->forum->notify_queue($post);
 			}
