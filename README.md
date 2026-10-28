@@ -47,6 +47,7 @@ testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; w�
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
 | Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
+| Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. |
 
 Klucz i sekret są przechowywane w tabeli `config_text` phpBB, która nie trafia do pamięci
 podręcznej ładowanej przy każdej stronie. Nie pojawiają się w żadnym dzienniku ani
@@ -172,9 +173,16 @@ przekierowaniem.
 ## Których postów rozszerzenie nie wstrzymuje
 
 - postów administratorów i moderatorów danego forum;
-- postów w forach, które i tak wymagają zatwierdzania (użytkownik bez uprawnienia „może
-  pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
-  wysyłany, bo werdykt niczego by nie zmienił;
+- postów, które phpBB i tak kieruje do kolejki do zatwierdzenia (użytkownik nie ma w danym
+  forum uprawnienia „może pisać bez zatwierdzania”): rozpatruje je moderator w kolejce phpBB
+  **bez werdyktu Minosa**, a ich tekst nie jest nigdzie wysyłany. W domyślnej konfiguracji
+  phpBB 3.3 dotyczy to nowo zarejestrowanych użytkowników: konto, które ma mniej postów niż
+  limit phpBB dla nowych użytkowników (domyślnie 3), należy do grupy nowo zarejestrowanych
+  (`NEWLY_REGISTERED`), a ta w forum utworzonym przy instalacji ma rolę „nowy użytkownik”,
+  która nie pozwala pisać bez zatwierdzania (sprawdzone w źródle phpBB 3.3; nazwy w panelu
+  zależą od pakietu językowego). To zwykle pierwsze posty nowych kont, w tym spam:
+  moderator ocenia je bez pomocy Minosa;
+- postów użytkowników spoza grup wybranych w ustawieniu „Grupy użytkowników”;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
 - odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
   załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z

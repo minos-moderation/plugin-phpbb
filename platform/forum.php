@@ -26,6 +26,9 @@ class forum
 	/** The largest `meta.links` value the gateway keeps. */
 	const MAX_LINKS = 100000;
 
+	/** phpBB's `GROUP_SPECIAL` (`includes/constants.php`): a group phpBB itself created. */
+	const GROUP_SPECIAL = 3;
+
 	/** The gateway's mask character. */
 	const MASK = '█';
 
@@ -93,6 +96,12 @@ class forum
 	/** @var string */
 	protected $users_table;
 
+	/** @var string */
+	protected $groups_table;
+
+	/** @var string */
+	protected $user_group_table;
+
 	/**
 	 * @param \phpbb\db\driver\driver_interface     $db            The database.
 	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
@@ -105,6 +114,8 @@ class forum
 	 * @param string                                $topics_table
 	 * @param string                                $forums_table
 	 * @param string                                $users_table
+	 * @param string                                $groups_table
+	 * @param string                                $user_group_table
 	 */
 	public function __construct(
 		\phpbb\db\driver\driver_interface $db,
@@ -117,7 +128,9 @@ class forum
 		$posts_table,
 		$topics_table,
 		$forums_table,
-		$users_table
+		$users_table,
+		$groups_table,
+		$user_group_table
 	)
 	{
 		$this->db = $db;
@@ -131,6 +144,8 @@ class forum
 		$this->topics_table = $topics_table;
 		$this->forums_table = $forums_table;
 		$this->users_table = $users_table;
+		$this->groups_table = $groups_table;
+		$this->user_group_table = $user_group_table;
 	}
 
 	/**
@@ -476,6 +491,63 @@ class forum
 		$row = $this->db->sql_fetchrow($result);
 		$this->db->sql_freeresult($result);
 		return $row ? $row : null;
+	}
+
+	/**
+	 * The board's user groups, for the ACP, in the order phpBB's own group lists use: the
+	 * special groups (guests, registered users, newly registered users, ...) first.
+	 *
+	 * @return array<int,array{group_id:int,group_name:string,special:bool}>
+	 */
+	public function groups()
+	{
+		$groups = array();
+		$result = $this->db->sql_query('SELECT group_id, group_name, group_type
+			FROM ' . $this->groups_table . '
+			ORDER BY group_type DESC, group_name ASC');
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$groups[] = array(
+				'group_id'   => (int) $row['group_id'],
+				'group_name' => (string) $row['group_name'],
+				'special'    => (int) $row['group_type'] === self::GROUP_SPECIAL,
+			);
+		}
+		$this->db->sql_freeresult($result);
+		return $groups;
+	}
+
+	/**
+	 * Whether a user belongs to one of some groups. Only an approved membership counts: phpBB
+	 * keeps a request to join a group as a row with `user_pending = 1`. A guest belongs to the
+	 * guests' group, as phpBB installs it.
+	 *
+	 * @param int            $user_id   The user.
+	 * @param array<int,int> $group_ids The groups.
+	 * @return bool|null Whether the user is a member; null when none of the groups exists any
+	 *     more (deleted since they were chosen).
+	 */
+	public function in_groups($user_id, array $group_ids)
+	{
+		$group_ids = array_values(array_unique(array_map('intval', $group_ids)));
+		if (!$group_ids)
+		{
+			return null;
+		}
+		$result = $this->db->sql_query('SELECT g.group_id, ug.user_id
+			FROM ' . $this->groups_table . ' g
+			LEFT JOIN ' . $this->user_group_table . ' ug
+				ON (ug.group_id = g.group_id AND ug.user_id = ' . (int) $user_id . ' AND ug.user_pending = 0)
+			WHERE ' . $this->db->sql_in_set('g.group_id', $group_ids));
+		$exists = false;
+		$member = false;
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$exists = true;
+			$member = $member || ($row['user_id'] !== null);
+		}
+		$this->db->sql_freeresult($result);
+		return $exists ? $member : null;
 	}
 
 	/**

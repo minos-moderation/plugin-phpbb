@@ -57,6 +57,9 @@ $lang = array_merge($lang, array(
 	'MINOS_FORUMS'               => 'Fora',
 	'MINOS_FORUMS_EXPLAIN'       => 'Fora, w których nowe posty są oceniane. Bez zaznaczenia: wszystkie fora.',
 	'MINOS_ALL_FORUMS'           => 'Teraz: wszystkie fora.',
+	'MINOS_GROUPS'               => 'Grupy użytkowników',
+	'MINOS_GROUPS_EXPLAIN'       => 'Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej, bez wysyłania do bramy. Bez zaznaczenia: wszystkie grupy. Posty administratorów i moderatorów forum nie są oceniane nigdy, a posty, które phpBB i tak kieruje do kolejki (użytkownik bez uprawnienia „może pisać bez zatwierdzania”, w domyślnej konfiguracji phpBB m.in. nowo zarejestrowani), rozpatruje moderator bez oceny Minosa — niezależnie od tego ustawienia.',
+	'MINOS_ALL_GROUPS'           => 'Teraz: wszystkie grupy.',
 
 	'MINOS_WEBHOOK'              => 'Adres webhooka',
 	'MINOS_WEBHOOK_EXPLAIN'      => 'Przekaż ten adres operatorowi bramy przy rejestracji klucza. Musi być publicznym adresem https:// w domenie forum; brama nie wysyła werdyktów na adresy IP ani przez przekierowania.',
@@ -99,6 +102,7 @@ $lang = array_merge($lang, array(
 	'MINOS_ERROR_WEBHOOK_SECRET' => 'Sekret webhooka to od 16 do 255 widocznych znaków ASCII, bez spacji.',
 	'MINOS_ERROR_CHOICE'         => 'Wybrano nieznaną wartość jednego z ustawień.',
 	'MINOS_ERROR_TIMEOUT'        => 'Czas oczekiwania musi mieścić się w przedziale od 20 do 1440 minut.',
+	'MINOS_ERROR_GROUPS'         => 'Wybrano grupę, której nie ma na forum.',
 
 	'MINOS_REFUSAL_BRAK_KLUCZA'         => 'Brama nie zna tego klucza API. Sprawdź klucz.',
 	'MINOS_REFUSAL_NIE_TA_POWIERZCHNIA' => 'Ten klucz nie jest kluczem B2B. Poproś operatora o klucz wgb2b_….',

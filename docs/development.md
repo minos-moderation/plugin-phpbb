@@ -87,8 +87,20 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   (`error_code` `empty_text`). A reply with no text, no link and the default subject
   (attachments only) is not held. A title is never sent alone.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
-  moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
-  moderators and not sent: nothing would be done with its verdict.
+  moderators are not held. A post phpBB queues anyway (no `f_noapprove`; by phpBB's
+  defaults the newly registered users, see "phpBB APIs") is left to the moderators and not
+  sent: nothing would be done with its verdict. The advisory mode for that queue (send such
+  posts, let the verdict only annotate them) is the deferred shared rule D9.4, not done.
+- **The administrator chooses whose posts are assessed: user groups** (audit K-53). A post
+  is held only when its author belongs to one of the groups chosen in the ACP
+  (`settings::group_ids`, a JSON list in `config_text`); none chosen means every group, the
+  default and the behaviour before the setting. A damaged value, and a list whose groups all
+  were deleted since, read as every group: the assessment is never switched off unseen. The
+  author of a new post is the current user (`submit_post()` takes `$user->data['user_id']`
+  for every mode but `edit`); `forum::in_groups` reads phpBB's `user_group` table, counting
+  approved memberships only (`user_pending = 0`). The check runs after the staff and
+  `f_noapprove` checks, so it costs one query for an assessable post only. An edit of a
+  post the extension already holds is reassessed whatever the groups.
 - **The title is assessed with the text** (the shared rule of the Minos plugins): the first
   post of a topic is sent as the topic's title, decoded as a reader sees it, a blank line and
   the post's text, all within the 3000 characters; a reply as its own subject and its text,
@@ -169,9 +181,9 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
-| `tests/Posting` | Which posts are held (a link without text: the failure mode at once); edits; the MCP queue mark. |
+| `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
-| `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
+| `tests/Acp` | Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
@@ -309,8 +321,18 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `config`, `config\db_text`, `request_interface::raw_variable()`, `auth::acl_get()` with
   `a_`, `m_` and `f_noapprove`, `controller\helper::route()` with `append_sid()` and an empty
   session id, `make_forum_select()`, `add_form_key()` / `check_form_key()`;
+- the user groups: `GROUPS_TABLE` (`group_type`, `GROUP_SPECIAL` = 3 for the groups phpBB
+  installs: `GUESTS`, `REGISTERED`, `REGISTERED_COPPA`, `GLOBAL_MODERATORS`,
+  `ADMINISTRATORS`, `BOTS`, `NEWLY_REGISTERED`, `AI_CRAWLERS`) and `USER_GROUP_TABLE`
+  (`user_pending` 1 for a request to join), the guest (`ANONYMOUS`) in `GUESTS`
+  (`install/schemas/schema_data.sql`); a special group's name shown through its `G_<NAME>`
+  language key, as `\phpbb\group\helper::get_name()` does; `NEWLY_REGISTERED`: `user_add()`
+  puts a new account there while `new_member_post_limit` (default 3) is set,
+  `session::update_session_infos()` takes it out once `user_posts` reaches the limit, and the
+  install gives the group the role `ROLE_FORUM_NEW_MEMBER` (`f_noapprove` NEVER) on the
+  forum it creates;
 - the ACP module discovery (`acp/*_module` with its `*_info`), the migration tools
-  `config.add`, `config_text.add`, `module.add`, the schema types, `depends_on()` on
+  `config.add`, `config_text.add` (which keeps an existing value), `module.add`, the schema types, `depends_on()` on
   `\phpbb\db\migration\data\v330\v330`, the cron task base (`is_runnable()`) and the
   `cron.task` tag, and `metadata_manager` (it requires `composer.json` and its fields).
 

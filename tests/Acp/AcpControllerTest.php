@@ -68,6 +68,31 @@ final class AcpControllerTest extends TestCase
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SETTINGS_UPDATED'));
 	}
 
+	public function testTheChosenGroupsAreStoredAndShown(): void
+	{
+		$this->submit($this->form(array('minos_groups' => array((string) Board::GROUP_TRUSTED, (string) Board::GROUP_REGISTERED))));
+
+		self::assertTrue($this->template->vars['S_MINOS_SAVED'], (string) $this->template->vars['ERROR_MSG']);
+		$settings = new settings($this->board->config, $this->board->config_text);
+		self::assertSame(array(Board::GROUP_TRUSTED, Board::GROUP_REGISTERED), $settings->group_ids());
+		self::assertFalse($this->template->vars['S_MINOS_ALL_GROUPS']);
+		$selected = array();
+		foreach ($this->template->blocks['minos_groups'] as $option)
+		{
+			if ($option['S_SELECTED'])
+			{
+				$selected[] = $option['VALUE'];
+			}
+		}
+		sort($selected);
+		self::assertSame(array(Board::GROUP_REGISTERED, Board::GROUP_TRUSTED), $selected);
+		self::assertCount(8, $this->template->blocks['minos_groups'], 'every group of the board');
+		self::assertSame('Stali bywalcy', end($this->template->blocks['minos_groups'])['LABEL'], 'the administrator\'s groups after phpBB\'s own');
+
+		$this->submit($this->form(array('minos_groups' => array())));
+		self::assertSame(array(), (new settings($this->board->config, $this->board->config_text))->group_ids(), 'none chosen again: every group');
+	}
+
 	public function testTheKeyAndTheSecretAreNeverShownBeyondAPrefix(): void
 	{
 		$this->submit($this->form(array('minos_api_key' => self::NEW_KEY, 'minos_webhook_secret' => self::NEW_SECRET)));
@@ -104,6 +129,7 @@ final class AcpControllerTest extends TestCase
 			'an unknown failure mode'     => array(array('minos_fail_mode' => 'fail-maybe'), 'MINOS_ERROR_CHOICE'),
 			'a timeout below the TTL'     => array(array('minos_timeout_min' => '10'), 'MINOS_ERROR_TIMEOUT'),
 			'a timeout under 20 minutes'  => array(array('minos_timeout_min' => '19'), 'MINOS_ERROR_TIMEOUT'),
+			'a group the board has not'   => array(array('minos_groups' => array('2', '999')), 'MINOS_ERROR_GROUPS'),
 		);
 	}
 
@@ -354,7 +380,7 @@ final class AcpControllerTest extends TestCase
 
 	private function show(FormRequest $request, ?\phpbb\controller\helper $helper = null): void
 	{
-		$controller = new acp($this->board->settings, $this->board->store, $request, $this->template, $this->board->language,
+		$controller = new acp($this->board->settings, $this->board->store, $this->board->forum, $request, $this->template, $this->board->language,
 			$this->board->log, new \phpbb\user(), $helper ?: new \phpbb\controller\helper(), './', 'php');
 		$controller->display('index.php?i=minos');
 	}

@@ -10,6 +10,7 @@
 
 namespace minos\moderation\controller;
 
+use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -40,6 +41,9 @@ class acp
 	/** @var pending_store */
 	protected $store;
 
+	/** @var forum */
+	protected $forum;
+
 	/** @var \phpbb\request\request_interface */
 	protected $request;
 
@@ -67,6 +71,7 @@ class acp
 	/**
 	 * @param settings                         $settings  The administrator's settings.
 	 * @param pending_store                    $store     The pending rows.
+	 * @param forum                            $forum     The board's user groups.
 	 * @param \phpbb\request\request_interface $request   The form.
 	 * @param \phpbb\template\template         $template  The page.
 	 * @param \phpbb\language\language         $language  The texts.
@@ -76,12 +81,13 @@ class acp
 	 * @param string                           $root_path phpBB's root path.
 	 * @param string                           $php_ext   `php`.
 	 */
-	public function __construct(settings $settings, pending_store $store, \phpbb\request\request_interface $request,
+	public function __construct(settings $settings, pending_store $store, forum $forum, \phpbb\request\request_interface $request,
 		\phpbb\template\template $template, \phpbb\language\language $language, \phpbb\log\log_interface $log,
 		\phpbb\user $user, \phpbb\controller\helper $helper, $root_path, $php_ext)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
+		$this->forum = $forum;
 		$this->request = $request;
 		$this->template = $template;
 		$this->language = $language;
@@ -105,6 +111,7 @@ class acp
 
 		$errors = array();
 		$saved = false;
+		$groups = $this->forum->groups();
 		if ($this->request->is_set_post('submit'))
 		{
 			if (!check_form_key(self::FORM_KEY))
@@ -114,7 +121,7 @@ class acp
 			else
 			{
 				$was_enabled = $this->settings->enabled();
-				$errors = $this->settings->save($this->read_form());
+				$errors = $this->settings->save($this->read_form(), array_column($groups, 'group_id'));
 				if (!$errors)
 				{
 					$saved = true;
@@ -163,7 +170,18 @@ class acp
 			'MINOS_RECENT_EXPLAIN'  => self::escape($this->language->lang('MINOS_RECENT_EXPLAIN', $waiting, $counts[pending_store::HELD])),
 			'S_FORUM_OPTIONS'       => make_forum_select($this->settings->forum_ids(), false, true, true, true, false, false),
 			'S_MINOS_ALL_FORUMS'    => !$this->settings->forum_ids(),
+			'S_MINOS_ALL_GROUPS'    => !$this->settings->group_ids(),
 		));
+
+		$chosen = $this->settings->group_ids();
+		foreach ($groups as $group)
+		{
+			$this->template->assign_block_vars('minos_groups', array(
+				'VALUE'      => $group['group_id'],
+				'LABEL'      => self::escape($this->group_name($group)),
+				'S_SELECTED' => in_array($group['group_id'], $chosen, true),
+			));
+		}
 
 		$this->choices('minos_profiles', settings::PROFILES, $this->settings->profile(), 'MINOS_PROFILE_');
 		$this->choices('minos_fail_modes', array(settings::FAIL_OPEN, settings::FAIL_CLOSED), $this->settings->fail_mode(), 'MINOS_FAIL_MODE_');
@@ -227,6 +245,7 @@ class acp
 			'censored'       => $this->request->variable('minos_censored', ''),
 			'blocked'        => $this->request->variable('minos_blocked', ''),
 			'forums'         => $this->request->variable('minos_forums', array(0)),
+			'groups'         => $this->request->variable('minos_groups', array(0)),
 		);
 	}
 
@@ -263,6 +282,20 @@ class acp
 	{
 		$url = $this->settings->gateway_url();
 		return ($url !== '') ? $url : settings::DEFAULT_GATEWAY_URL;
+	}
+
+	/**
+	 * A group's name as phpBB's own lists show it: a group phpBB created under its name in the
+	 * board's language (`G_` and the stored name, as `\phpbb\group\helper::get_name()`).
+	 *
+	 * @param array{group_id:int,group_name:string,special:bool} $group The group.
+	 * @return string
+	 */
+	protected function group_name(array $group)
+	{
+		$key = 'G_' . strtoupper($group['group_name']);
+		$text = $group['special'] ? $this->language->lang($key) : $key;
+		return ($text === $key) ? $group['group_name'] : $text;
 	}
 
 	/**

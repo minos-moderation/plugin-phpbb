@@ -13,8 +13,8 @@ namespace minos\moderation\service;
 /**
  * The administrator's settings, read defensively.
  *
- * Plain settings live in phpBB's `config` table. The API key, the webhook secret and the
- * forum list live in `config_text`, which phpBB does not load into every page nor into its
+ * Plain settings live in phpBB's `config` table. The API key, the webhook secret, the forum
+ * list and the group list live in `config_text`, which phpBB does not load into every page nor into its
  * global cache file. A stored value this class does not recognise reads as the setting that
  * publishes nothing by itself (hold, fail-closed): a damaged row must never publish posts.
  */
@@ -93,6 +93,7 @@ class settings
 	const API_KEY = 'minos_moderation_api_key';
 	const WEBHOOK_SECRET = 'minos_moderation_webhook_secret';
 	const FORUMS = 'minos_moderation_forums';
+	const GROUPS = 'minos_moderation_groups';
 
 	/** @var \phpbb\config\config */
 	protected $config;
@@ -212,20 +213,7 @@ class settings
 	 */
 	public function forum_ids()
 	{
-		$ids = json_decode($this->text(self::FORUMS), true);
-		if (!is_array($ids))
-		{
-			return array();
-		}
-		$clean = array();
-		foreach ($ids as $id)
-		{
-			if (is_int($id) && $id > 0)
-			{
-				$clean[$id] = $id;
-			}
-		}
-		return array_values($clean);
+		return self::id_list($this->text(self::FORUMS));
 	}
 
 	/**
@@ -238,6 +226,19 @@ class settings
 	{
 		$ids = $this->forum_ids();
 		return empty($ids) || in_array((int) $forum_id, $ids, true);
+	}
+
+	/**
+	 * The user groups whose members' posts the extension assesses.
+	 *
+	 * A stored value that is not a list of group ids reads as every group: a damaged row must
+	 * never switch the assessment off unseen.
+	 *
+	 * @return array<int,int> Group ids; empty means every group (also the default).
+	 */
+	public function group_ids()
+	{
+		return self::id_list($this->text(self::GROUPS));
 	}
 
 	/**
@@ -383,10 +384,12 @@ class settings
 	 * either of them back.
 	 *
 	 * @param array<string,mixed> $values enabled (bool), gateway_url, api_key, webhook_secret,
-	 *     profile, fail_mode, censored, blocked (strings), timeout_min (int), forums (int[]).
+	 *     profile, fail_mode, censored, blocked (strings), timeout_min (int), forums (int[]),
+	 *     groups (int[], optional: none selected means every group).
+	 * @param array<int,int>      $known_groups The board's group ids: a selected group must be one.
 	 * @return array<int,string> Language keys of the problems; empty when everything was saved.
 	 */
-	public function save(array $values)
+	public function save(array $values, array $known_groups = array())
 	{
 		$errors = array();
 		$url = rtrim(trim((string) $values['gateway_url']), '/');
@@ -420,6 +423,18 @@ class settings
 		{
 			$errors[] = 'MINOS_ERROR_TIMEOUT';
 		}
+		$groups = array();
+		foreach (isset($values['groups']) ? (array) $values['groups'] : array() as $id)
+		{
+			if ((int) $id > 0)
+			{
+				$groups[(int) $id] = (int) $id;
+			}
+		}
+		if (array_diff($groups, array_map('intval', $known_groups)))
+		{
+			$errors[] = 'MINOS_ERROR_GROUPS';
+		}
 		if ($errors)
 		{
 			return $errors;
@@ -442,6 +457,7 @@ class settings
 		$this->config->set(self::CENSORED, $censored);
 		$this->config->set(self::BLOCKED, $blocked);
 		$this->set_text(self::FORUMS, $forums ? json_encode(array_values($forums)) : '');
+		$this->set_text(self::GROUPS, $groups ? json_encode(array_values($groups)) : '');
 		if ($key !== '')
 		{
 			$this->set_text(self::API_KEY, $key);
@@ -496,6 +512,30 @@ class settings
 	public static function valid_secret($secret)
 	{
 		return (bool) preg_match('/^[\x21-\x7e]{16,255}$/', (string) $secret);
+	}
+
+	/**
+	 * A stored list of ids (JSON), read defensively.
+	 *
+	 * @param string $stored The stored value.
+	 * @return array<int,int> The positive integer ids, each once; empty for anything else.
+	 */
+	protected static function id_list($stored)
+	{
+		$ids = json_decode((string) $stored, true);
+		if (!is_array($ids))
+		{
+			return array();
+		}
+		$clean = array();
+		foreach ($ids as $id)
+		{
+			if (is_int($id) && $id > 0)
+			{
+				$clean[$id] = $id;
+			}
+		}
+		return array_values($clean);
 	}
 
 	/**

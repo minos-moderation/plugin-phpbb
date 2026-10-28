@@ -43,6 +43,17 @@ class Board
 	const USER_EMAIL = 'autorka@forum.example';
 	const USER_IP = '198.51.100.23';
 
+	/** A newly registered user (phpBB's NEWLY_REGISTERED group, besides REGISTERED). */
+	const NEW_USER = 3;
+
+	/** phpBB's special groups as it installs them (`install/schemas/schema_data.sql`). */
+	const GROUP_GUESTS = 1;
+	const GROUP_REGISTERED = 2;
+	const GROUP_NEWLY_REGISTERED = 7;
+
+	/** A group the administrator made; the author belongs to it. */
+	const GROUP_TRUSTED = 10;
+
 	/** phpBB's table prefix. */
 	const PREFIX = 'phpbb_';
 
@@ -100,6 +111,9 @@ class Board
 	/** @var \phpbb\auth\auth */
 	public $auth;
 
+	/** @var \phpbb\user The user who posts. */
+	public $user;
+
 	/** @var listener */
 	public $listener;
 
@@ -134,7 +148,8 @@ class Board
 		$board->log = new MemoryLog();
 		$board->language = new \phpbb\language\language(__DIR__ . '/../../language/pl');
 		$board->forum = new forum($board->db, $board->visibility, $board->notifications, new TextUtils(), $board->parser,
-			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users');
+			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users',
+			self::PREFIX . 'groups', self::PREFIX . 'user_group');
 		$board->transport = $transport ?: new RecordingTransport();
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
@@ -143,7 +158,8 @@ class Board
 		$board->dispatcher = new RecordingDispatcher();
 		$board->auth = new \phpbb\auth\auth();
 		$board->auth->global['f_noapprove'] = true;
-		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language);
+		$board->user = new \phpbb\user();
+		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
 		return $board;
 	}
 
@@ -193,7 +209,7 @@ class Board
 	 *
 	 * @param string $text    The post's plain text (stored the way the parser stores it).
 	 * @param string $mode    `post`, `reply` or `quote`.
-	 * @param array  $options forum_id, poster_id, topic_id (for a reply), xml (a stored text),
+	 * @param array  $options forum_id, poster_id (also the current user), topic_id (for a reply), xml (a stored text),
 	 *     data (phpBB's post data as other extensions left it), title (of a new topic) or
 	 *     subject (of a reply), both as phpBB stores them (HTML-escaped).
 	 * @return array{post_id:int,visibility:int,data:array} The post and what phpBB stored.
@@ -202,6 +218,8 @@ class Board
 	{
 		$forum_id = isset($options['forum_id']) ? $options['forum_id'] : self::FORUM;
 		$xml = isset($options['xml']) ? $options['xml'] : $this->xml($text);
+		// A new post is always the current user's.
+		$this->user->data['user_id'] = isset($options['poster_id']) ? (int) $options['poster_id'] : self::USER;
 		// What posting.php passes: the subject typed (`post_data`), and the topic's title, or a
 		// new topic's subject (`data`).
 		if (empty($options['topic_id']))
@@ -465,7 +483,19 @@ class Board
 			post_text TEXT NOT NULL DEFAULT '', post_username TEXT NOT NULL DEFAULT '', post_checksum TEXT NOT NULL DEFAULT '',
 			bbcode_uid TEXT NOT NULL DEFAULT '', bbcode_bitfield TEXT NOT NULL DEFAULT '', post_delete_reason TEXT NOT NULL DEFAULT '',
 			post_delete_user INTEGER NOT NULL DEFAULT 0, post_delete_time INTEGER NOT NULL DEFAULT 0)");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}groups (group_id INTEGER PRIMARY KEY, group_type INTEGER NOT NULL DEFAULT 1,
+			group_name TEXT NOT NULL DEFAULT '')");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}user_group (group_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0,
+			group_leader INTEGER NOT NULL DEFAULT 0, user_pending INTEGER NOT NULL DEFAULT 1)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}forums (forum_id, forum_name) VALUES (2, 'Ogólne'), (3, 'Dla młodzieży')");
+		// phpBB's special groups (group_type 3) as installed, and one the administrator made.
+		$this->db->pdo->exec("INSERT INTO {$prefix}groups (group_id, group_type, group_name) VALUES
+			(1, 3, 'GUESTS'), (2, 3, 'REGISTERED'), (3, 3, 'REGISTERED_COPPA'), (4, 3, 'GLOBAL_MODERATORS'),
+			(5, 3, 'ADMINISTRATORS'), (6, 3, 'BOTS'), (7, 3, 'NEWLY_REGISTERED'), (" . self::GROUP_TRUSTED . ", 0, 'Stali bywalcy')");
+		// The guest in GUESTS (as phpBB installs it); the author registered and trusted; the new
+		// user registered, newly registered, and only asking to join the trusted (pending).
+		$this->db->pdo->exec("INSERT INTO {$prefix}user_group (group_id, user_id, user_pending) VALUES
+			(1, 1, 0), (2, 2, 0), (" . self::GROUP_TRUSTED . ", 2, 0), (2, 3, 0), (7, 3, 0), (" . self::GROUP_TRUSTED . ", 3, 1)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}users (user_id, username, user_email, user_ip, user_posts) VALUES
 			(1, 'Anonymous', '', '', 0), (2, 'Autorka', '" . self::USER_EMAIL . "', '" . self::USER_IP . "', 5), (3, 'Nowy', 'nowy@forum.example', '198.51.100.99', 0)");
 
@@ -511,6 +541,6 @@ class Board
 		$this->submitter = new submitter($this->settings, $this->store, $this->forum, $this->transport, $this->applier);
 		$this->receiver = new receiver($this->settings, $this->store);
 		$this->deferred = new deferred_verdicts($this->applier, $this->forum);
-		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language);
+		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language, $this->user);
 	}
 }

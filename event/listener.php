@@ -26,7 +26,8 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * the gateway did not see.
  *
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
- * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
+ * moderator anyway (no `f_noapprove`); posts by users outside the groups the administrator
+ * chose (none chosen: every group); posts another extension already set a visibility for;
  * replies with neither text to assess, a link nor a subject of their own (attachments only);
  * and everything while the extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
  * address), it holds new posts and gives them the failure mode at once (the plugins' shared
@@ -69,6 +70,9 @@ class listener implements EventSubscriberInterface
 	/** @var \phpbb\language\language */
 	protected $language;
 
+	/** @var \phpbb\user */
+	protected $user;
+
 	/**
 	 * @param settings                 $settings  The administrator's settings.
 	 * @param pending_store            $store     The pending rows.
@@ -76,9 +80,10 @@ class listener implements EventSubscriberInterface
 	 * @param submitter                $submitter Sends posts to the gateway.
 	 * @param \phpbb\auth\auth         $auth      The poster's permissions.
 	 * @param \phpbb\language\language $language  The MCP labels.
+	 * @param \phpbb\user              $user      The poster (a new post is always the current user's).
 	 */
 	public function __construct(settings $settings, pending_store $store, forum $forum, submitter $submitter,
-		\phpbb\auth\auth $auth, \phpbb\language\language $language)
+		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
@@ -86,6 +91,7 @@ class listener implements EventSubscriberInterface
 		$this->submitter = $submitter;
 		$this->auth = $auth;
 		$this->language = $language;
+		$this->user = $user;
 	}
 
 	/**
@@ -257,6 +263,12 @@ class listener implements EventSubscriberInterface
 			return false;
 		}
 		if (!$this->auth->acl_get('f_noapprove', $forum_id))
+		{
+			return false;
+		}
+		// Only members of the chosen groups; groups that no longer exist choose nobody out.
+		$groups = $this->settings->group_ids();
+		if ($groups && $this->forum->in_groups((int) $this->user->data['user_id'], $groups) === false)
 		{
 			return false;
 		}
