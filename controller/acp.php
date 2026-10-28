@@ -196,7 +196,7 @@ class acp
 		{
 			$this->template->assign_block_vars('minos_groups', array(
 				'VALUE'      => $group['group_id'],
-				'LABEL'      => self::escape($this->group_name($group)),
+				'LABEL'      => self::escape($group['open'] ? $this->language->lang('MINOS_GROUP_OPEN', $this->group_name($group)) : $this->group_name($group)),
 				'S_SELECTED' => in_array($group['group_id'], $chosen, true),
 			));
 		}
@@ -346,7 +346,7 @@ class acp
 	 * A group's name as phpBB's own lists show it: a group phpBB created under its name in the
 	 * board's language (`G_` and the stored name, as `\phpbb\group\helper::get_name()`).
 	 *
-	 * @param array{group_id:int,group_name:string,special:bool} $group The group.
+	 * @param array{group_id:int,group_name:string,special:bool,open:bool} $group The group.
 	 * @return string
 	 */
 	protected function group_name(array $group)

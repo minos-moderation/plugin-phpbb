@@ -48,7 +48,7 @@ testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; w�
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
 | Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
-| Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. |
+| Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. Wybieraj grupy, z których użytkownik nie wystąpi sam (specjalne grupy phpBB, zamknięte, ukryte): z grupy otwartej członek może wystąpić w swoim panelu i od tej chwili pisać bez oceny — lista w ustawieniach oznacza takie grupy. |
 
 Klucz i sekret są przechowywane w tabeli `config_text` phpBB, która nie trafia do pamięci
 podręcznej ładowanej przy każdej stronie. Nie pojawiają się w żadnym dzienniku ani

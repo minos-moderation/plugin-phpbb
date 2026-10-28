@@ -29,6 +29,13 @@ class forum
 	/** phpBB's `GROUP_SPECIAL` (`includes/constants.php`): a group phpBB itself created. */
 	const GROUP_SPECIAL = 3;
 
+	/**
+	 * phpBB's `GROUP_OPEN` and `GROUP_FREE`: groups a member may leave by himself in the UCP
+	 * (`ucp_groups`, "resign", refused for any other type), and join (`GROUP_FREE` without
+	 * approval).
+	 */
+	const GROUPS_OPEN = array(0, 4);
+
 	/** phpBB's notification types that tell moderators a post or topic waits for approval. */
 	const QUEUE_NOTIFICATIONS = array('notification.type.topic_in_queue', 'notification.type.post_in_queue');
 
@@ -538,7 +545,7 @@ class forum
 	 * The board's user groups, for the ACP, in the order phpBB's own group lists use: the
 	 * special groups (guests, registered users, newly registered users, ...) first.
 	 *
-	 * @return array<int,array{group_id:int,group_name:string,special:bool}>
+	 * @return array<int,array{group_id:int,group_name:string,special:bool,open:bool}>
 	 */
 	public function groups()
 	{
@@ -552,6 +559,7 @@ class forum
 				'group_id'   => (int) $row['group_id'],
 				'group_name' => (string) $row['group_name'],
 				'special'    => (int) $row['group_type'] === self::GROUP_SPECIAL,
+				'open'       => in_array((int) $row['group_type'], self::GROUPS_OPEN, true),
 			);
 		}
 		$this->db->sql_freeresult($result);

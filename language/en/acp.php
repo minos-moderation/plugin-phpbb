@@ -58,8 +58,9 @@ $lang = array_merge($lang, array(
 	'MINOS_FORUMS_EXPLAIN'       => 'Fora, w których nowe posty są oceniane. Bez zaznaczenia: wszystkie fora.',
 	'MINOS_ALL_FORUMS'           => 'Teraz: wszystkie fora.',
 	'MINOS_GROUPS'               => 'Grupy użytkowników',
-	'MINOS_GROUPS_EXPLAIN'       => 'Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej, bez wysyłania do bramy. Bez zaznaczenia: wszystkie grupy. Posty administratorów i moderatorów forum nie są oceniane nigdy, a posty, które phpBB i tak kieruje do kolejki (użytkownik bez uprawnienia „może pisać bez zatwierdzania”, w domyślnej konfiguracji phpBB m.in. nowo zarejestrowani), rozpatruje moderator bez oceny Minosa — niezależnie od tego ustawienia.',
+	'MINOS_GROUPS_EXPLAIN'       => 'Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej, bez wysyłania do bramy. Bez zaznaczenia: wszystkie grupy. Wybieraj grupy, z których użytkownik nie wystąpi sam: specjalne, zamknięte i ukryte; z grupy otwartej członek może sam wystąpić w swoim panelu i od tej chwili pisać bez oceny (takie grupy są oznaczone na liście). Posty administratorów i moderatorów forum nie są oceniane nigdy, a posty, które phpBB i tak kieruje do kolejki (użytkownik bez uprawnienia „może pisać bez zatwierdzania”, w domyślnej konfiguracji phpBB m.in. nowo zarejestrowani), rozpatruje moderator bez oceny Minosa — niezależnie od tego ustawienia.',
 	'MINOS_ALL_GROUPS'           => 'Teraz: wszystkie grupy.',
+	'MINOS_GROUP_OPEN'           => '%s (grupa otwarta: członek może sam z niej wystąpić)',
 
 	'MINOS_WEBHOOK'              => 'Adres webhooka',
 	'MINOS_WEBHOOK_EXPLAIN'      => 'Przekaż ten adres operatorowi bramy przy rejestracji klucza. Musi być publicznym adresem https:// w domenie forum; brama nie wysyła werdyktów na adresy IP ani przez przekierowania.',

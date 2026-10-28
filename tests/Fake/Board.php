@@ -53,8 +53,11 @@ class Board
 	const GROUP_REGISTERED = 2;
 	const GROUP_NEWLY_REGISTERED = 7;
 
-	/** A group the administrator made; the author belongs to it. */
+	/** A group the administrator made, open (a member may leave it); the author belongs to it. */
 	const GROUP_TRUSTED = 10;
+
+	/** A closed group the administrator made (a member cannot leave it by himself). */
+	const GROUP_TEAM = 11;
 
 	/** phpBB's table prefix. */
 	const PREFIX = 'phpbb_';
@@ -562,10 +565,12 @@ class Board
 		$this->db->pdo->exec("CREATE TABLE {$prefix}user_group (group_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0,
 			group_leader INTEGER NOT NULL DEFAULT 0, user_pending INTEGER NOT NULL DEFAULT 1)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}forums (forum_id, forum_name) VALUES (2, 'Ogólne'), (3, 'Dla młodzieży')");
-		// phpBB's special groups (group_type 3) as installed, and one the administrator made.
+		// phpBB's special groups (group_type 3) as installed, and two the administrator made:
+		// open (0) and closed (1).
 		$this->db->pdo->exec("INSERT INTO {$prefix}groups (group_id, group_type, group_name) VALUES
 			(1, 3, 'GUESTS'), (2, 3, 'REGISTERED'), (3, 3, 'REGISTERED_COPPA'), (4, 3, 'GLOBAL_MODERATORS'),
-			(5, 3, 'ADMINISTRATORS'), (6, 3, 'BOTS'), (7, 3, 'NEWLY_REGISTERED'), (" . self::GROUP_TRUSTED . ", 0, 'Stali bywalcy')");
+			(5, 3, 'ADMINISTRATORS'), (6, 3, 'BOTS'), (7, 3, 'NEWLY_REGISTERED'), (" . self::GROUP_TRUSTED . ", 0, 'Stali bywalcy'),
+			(" . self::GROUP_TEAM . ", 1, 'Zespół redakcji')");
 		// The guest in GUESTS (as phpBB installs it); the author registered and trusted; the new
 		// user registered, newly registered, and only asking to join the trusted (pending).
 		$this->db->pdo->exec("INSERT INTO {$prefix}user_group (group_id, user_id, user_pending) VALUES

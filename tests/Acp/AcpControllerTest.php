@@ -86,8 +86,11 @@ final class AcpControllerTest extends TestCase
 		}
 		sort($selected);
 		self::assertSame(array(Board::GROUP_REGISTERED, Board::GROUP_TRUSTED), $selected);
-		self::assertCount(8, $this->template->blocks['minos_groups'], 'every group of the board');
-		self::assertSame('Stali bywalcy', end($this->template->blocks['minos_groups'])['LABEL'], 'the administrator\'s groups after phpBB\'s own');
+		self::assertCount(9, $this->template->blocks['minos_groups'], 'every group of the board');
+		$labels = array_column($this->template->blocks['minos_groups'], 'LABEL', 'VALUE');
+		self::assertSame(array(Board::GROUP_TEAM, Board::GROUP_TRUSTED), array_slice(array_keys($labels), -2), 'the administrator\'s groups after phpBB\'s own');
+		self::assertSame($this->board->language->lang('MINOS_GROUP_OPEN', 'Stali bywalcy'), $labels[Board::GROUP_TRUSTED], 'an open group is marked');
+		self::assertSame('Zespół redakcji', $labels[Board::GROUP_TEAM], 'a closed one is not');
 
 		$this->submit($this->form(array('minos_groups' => array())));
 		self::assertSame(array(), (new settings($this->board->config, $this->board->config_text))->group_ids(), 'none chosen again: every group');

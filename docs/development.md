@@ -107,7 +107,10 @@ decision).
   for every mode but `edit`); `forum::in_groups` reads phpBB's `user_group` table, counting
   approved memberships only (`user_pending = 0`). The check runs after the staff and
   `f_noapprove` checks, so it costs one query for an assessable post only. An edit of a
-  post the extension already holds is reassessed whatever the groups.
+  post the extension already holds is reassessed whatever the groups. A member may leave an
+  open group (`GROUP_OPEN`, `GROUP_FREE`) by himself in the UCP (`ucp_groups` refuses
+  "resign" for any other type) and post unassessed from then on: the ACP explains it and
+  marks such groups in the list (`MINOS_GROUP_OPEN`).
 - **The title is assessed with the text** (the shared rule of the Minos plugins): the first
   post of a topic is sent as the topic's title, decoded as a reader sees it, a blank line and
   the post's text, all within the 3000 characters; a reply as its own subject and its text,
