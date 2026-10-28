@@ -26,18 +26,24 @@ use minos\moderation\platform\forum;
  * Before the request leaves, each row stores the digest of its text (`sent_md5`). The wait
  * for a verdict - the time-out - is counted from the gateway's `202`.
  *
- * - `202` whose `przyjete` names every item: the rows wait for their webhooks;
- * - `429`, `503`, another `5xx`, no answer at all, or an answer that is not the gateway's:
- *   the rows are retried after `blad.ponow_za_s`, or after a backoff doubling from 60 s -
- *   unless `ponow_za_s` ends after a row's time-out: no verdict can come in time, so the
- *   failure mode applies at once (the plugins' shared rule D9.3);
- * - any other refusal (`3xx`, `4xx`): a configuration error that retrying cannot fix. The
+ * Only `202` accepts (the plugins' shared rule D9.6, `F5a` of client-php's
+ * `docs/plugin-behaviour.md`):
+ *
+ * - `202`: each item its `przyjete` names waits for its webhook; an item it does not name is
+ *   retried;
+ * - `429`, `408` (a time-out, counted as no answer), any `5xx`, no answer at all, and a `2xx`
+ *   other than `202` - whatever its body says, also a full `przyjete`: not the gateway's
+ *   acceptance (a proxy's login page, a wrong address): the rows are retried after
+ *   `blad.ponow_za_s`, or after a backoff doubling from 60 s - unless `ponow_za_s` ends after
+ *   a row's time-out: no verdict can come in time, so the failure mode applies at once (the
+ *   plugins' shared rule D9.3);
+ * - any other refusal (`3xx`, a `4xx` but `408` and `429`): a configuration error that retrying cannot fix. The
  *   failure mode applies, and the status and the code go to the error log and the ACP.
  *
- * A `429`, a `503` or no answer at all also starts the shared pause of sending
- * ({@see settings::record_pause}): until `ponow_za_s` (or 60 s) has passed, nothing is sent -
- * a post from an author's request waits in the queue for the cron task, and a run of the
- * cron task sends no further batch. Every refusal by the key's limits spends its allowance,
+ * A `429`, a `503`, a `408`, no answer at all and a `2xx` other than `202` also start the
+ * shared pause of sending ({@see settings::record_pause}): until `ponow_za_s` (or 60 s) has
+ * passed, nothing is sent - a post from an author's request waits in the queue for the cron
+ * task, and a run of the cron task sends no further batch. Every refusal by the key's limits spends its allowance,
  * so one refused request is better than one per post. A post whose wait for a verdict ends
  * before the pause does gets the failure mode at once, as above. The next `202` ends the
  * pause; the ACP shows it until then.
@@ -67,8 +73,10 @@ class submitter
 
 	/**
 	 * The kind of pause each `429` code starts ({@see settings::record_pause}); a `429` with
-	 * any other code pauses as the key's limit ({@see settings::PAUSE_KEY}), a `503` and no
-	 * answer at all as an unavailable gateway ({@see settings::PAUSE_UNAVAILABLE}).
+	 * any other code pauses as the key's limit ({@see settings::PAUSE_KEY}), a `503`, a `408`
+	 * and no answer at all as an unavailable gateway ({@see settings::PAUSE_UNAVAILABLE}), a
+	 * `2xx` other than `202` as an answer that is not the gateway's
+	 * ({@see settings::PAUSE_FOREIGN}).
 	 */
 	const PAUSES = array(
 		'limit_dobowy_klucza'   => settings::PAUSE_LIMIT,
@@ -234,7 +242,8 @@ class submitter
 	}
 
 	/**
-	 * Starts the shared pause of sending after an answer that asks to wait.
+	 * Starts the shared pause of sending after an answer that asks to wait, or that is not the
+	 * gateway's at all.
 	 *
 	 * @param int|null $status      The HTTP status, or null for no answer at all.
 	 * @param string   $code        The refusal's code, or the extension's label.
@@ -248,9 +257,13 @@ class submitter
 		{
 			$kind = array_key_exists($code, self::PAUSES) ? self::PAUSES[$code] : settings::PAUSE_KEY;
 		}
-		else if ($status === null || $status === 503)
+		else if ($status === null || $status === 503 || $status === 408)
 		{
 			$kind = settings::PAUSE_UNAVAILABLE;
+		}
+		else if ($status >= 200 && $status < 300)
+		{
+			$kind = settings::PAUSE_FOREIGN;
 		}
 		else
 		{
@@ -354,23 +367,35 @@ class submitter
 		$error = (is_array($data) && isset($data['blad']) && is_array($data['blad'])) ? $data['blad'] : array();
 		$code = (isset($error['kod']) && is_string($error['kod']) && preg_match('/^[a-z0-9_]{1,40}$/', $error['kod'])) ? $error['kod'] : '';
 
-		if ($status >= 200 && $status < 300)
+		if ($status === 202)
 		{
-			if ($this->all_accepted($items, $data))
+			// The gateway's acceptance: of each item its `przyjete` names, and of no other.
+			$this->settings->clear_pause();
+			$accepted = $this->accepted_ids($data);
+			$missing = array();
+			foreach ($batch as $entry)
 			{
-				$this->settings->clear_pause();
-				foreach ($batch as $entry)
+				if (!isset($accepted[$entry['item']['id']]))
 				{
-					$this->guarded((int) $entry['row']['post_id'], function () use ($entry, $now) {
-						return $this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $now);
-					});
+					$missing[] = $entry;
+					continue;
 				}
-				return;
+				$this->guarded((int) $entry['row']['post_id'], function () use ($entry, $now) {
+					return $this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $now);
+				});
 			}
-			$this->retry($batch, null, self::ERROR_ANSWER, $now);
+			$this->retry($missing, null, self::ERROR_ANSWER, $now);
 			return;
 		}
-		if ($status === 429 || $status >= 500)
+		if ($status >= 200 && $status < 300)
+		{
+			// Not the gateway's acceptance, whatever the body says: retried, and a pause.
+			$code = 'http_' . $status;
+			$this->pause_sending($status, $code, null, $now);
+			$this->retry($batch, null, $code, $now);
+			return;
+		}
+		if ($status === 429 || $status === 408 || $status >= 500)
 		{
 			$retry_after = (isset($error['ponow_za_s']) && is_int($error['ponow_za_s'])) ? $error['ponow_za_s'] : null;
 			$code = ($code !== '') ? $code : 'http_' . $status;
@@ -405,26 +430,25 @@ class submitter
 	}
 
 	/**
-	 * Whether a `2xx` answer is the gateway's acceptance of every item sent.
+	 * The ids a `202` names as accepted (`przyjete`).
 	 *
-	 * @param array<int,array<string,mixed>> $items The items sent.
-	 * @param mixed                          $data  The decoded answer.
-	 * @return bool
+	 * @param mixed $data The decoded answer.
+	 * @return array<string,true> The ids, as keys; empty when the answer names none.
 	 */
-	protected function all_accepted(array $items, $data)
+	protected function accepted_ids($data)
 	{
-		if (!is_array($data) || !isset($data['przyjete']) || !is_array($data['przyjete']))
+		$ids = array();
+		if (is_array($data) && isset($data['przyjete']) && is_array($data['przyjete']))
 		{
-			return false;
-		}
-		foreach ($items as $item)
-		{
-			if (!in_array($item['id'], $data['przyjete'], true))
+			foreach ($data['przyjete'] as $id)
 			{
-				return false;
+				if (is_string($id))
+				{
+					$ids[$id] = true;
+				}
 			}
 		}
-		return true;
+		return $ids;
 	}
 
 	/**

@@ -323,6 +323,8 @@ final class AcpControllerTest extends TestCase
 		return array(
 			'the key\'s minute limit'  => array(429, 'limit_minutowy_klucza', 'MINOS_PAUSE_KEY'),
 			'an unavailable gateway'   => array(503, 'kolejka_niedostepna', 'MINOS_PAUSE_UNAVAILABLE'),
+			'a 408'                    => array(408, 'przekroczony_czas', 'MINOS_PAUSE_UNAVAILABLE'),
+			'a 200 that is not a 202'  => array(200, 'cokolwiek', 'MINOS_PAUSE_FOREIGN'),
 		);
 	}
 

@@ -6,27 +6,29 @@ use minos\moderation\service\transport_interface;
 
 /**
  * The gateway as the tests script it: every request is recorded, and each gets the next
- * scripted answer, or `202` accepting every item when the script is empty.
+ * scripted answer, or `202` accepting every item when the script is empty. A scripted answer
+ * may be a function of the ids the request carries.
  */
 class RecordingTransport implements transport_interface
 {
 	/** @var array<int,array{url:string,headers:array<string,string>,body:string,timeout:int}> */
 	public $requests = array();
 
-	/** @var array<int,array{status:int,body:string}|null> */
+	/** @var array<int,array{status:int,body:string}|callable|null> */
 	public $script = array();
 
 	public function post($url, array $headers, $body, $timeout_s)
 	{
 		$this->requests[] = array('url' => $url, 'headers' => $headers, 'body' => $body, 'timeout' => $timeout_s);
-		if ($this->script)
-		{
-			return array_shift($this->script);
-		}
 		$ids = array();
 		foreach (json_decode($body, true)['elementy'] as $item)
 		{
 			$ids[] = $item['id'];
+		}
+		if ($this->script)
+		{
+			$answer = array_shift($this->script);
+			return is_callable($answer) ? $answer($ids) : $answer;
 		}
 		return array('status' => 202, 'body' => json_encode(array('przyjete' => $ids)));
 	}

@@ -65,8 +65,14 @@ class settings
 	/** The gateway's pause: it is unavailable (`503`, no answer at all). */
 	const PAUSE_UNAVAILABLE = 'unavailable';
 
+	/**
+	 * The gateway's pause: something other than the gateway answered (a `2xx` other than
+	 * `202`, such as a proxy's login page), so the gateway did not take the posts.
+	 */
+	const PAUSE_FOREIGN = 'foreign';
+
 	/** Every kind of the gateway's pause. */
-	const PAUSE_KINDS = array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD, self::PAUSE_KEY, self::PAUSE_UNAVAILABLE);
+	const PAUSE_KINDS = array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD, self::PAUSE_KEY, self::PAUSE_UNAVAILABLE, self::PAUSE_FOREIGN);
 
 	/**
 	 * Why the webhook refused a delivery's signature, as the bundled client's

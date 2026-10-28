@@ -182,8 +182,10 @@ nie jest oceniana (patrz „Ograniczenia”).
 
 Gdy brama odmawia z powodu limitów (`429`: limit klucza na minutę, na dobę lub zapytań w
 toku, wspólny limit wszystkich kluczy, pełna kolejka) albo jest chwilowo niedostępna (`503`,
-brak połączenia), rozszerzenie przestaje wysyłać posty do czasu wskazanego przez bramę (bez
-takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
+`408`, brak połączenia), a także gdy pod adresem bramy odpowiada coś innego niż brama
+(odpowiedź `2xx` inna niż `202`, np. strona logowania serwera pośredniczącego — wtedy
+komunikat radzi sprawdzić adres bramy), rozszerzenie przestaje wysyłać posty do czasu
+wskazanego przez bramę (bez takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
 cron, a zadanie cron po pierwszej takiej odpowiedzi nie wysyła kolejnych paczek. Każda
 odmowa z powodu limitów klucza zużywa jego pulę zapytań, więc zamiast odmowy dla każdego
 postu jest jedna. Post, którego dotyczyła odmowa, jest ponawiany po czasie wskazanym przez
@@ -198,11 +200,13 @@ Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, 
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
 
-Dokładnie: ponawiane są odpowiedź `429` (z każdym kodem), każda odpowiedź `5xx`, brak
-odpowiedzi (błąd połączenia albo przekroczone 10 sekund) i odpowiedź `2xx`, która nie
-przyjmuje każdego wysłanego postu (brak go w polu `przyjete`, także odpowiedź `2xx` spoza
-bramy, np. strona logowania serwera pośredniczącego). Każda inna odpowiedź — `3xx` (np.
-przekierowanie) i `4xx` inne niż `429`, także `408` — jest traktowana jak błąd konfiguracji.
+Dokładnie: post przyjmuje wyłącznie odpowiedź `202`, i to tylko wtedy, gdy wymienia go w
+polu `przyjete` (post, którego tam brak, jest ponawiany). Ponawiane są też odpowiedź `429` (z
+każdym kodem), `408` (liczona jak brak odpowiedzi), każda odpowiedź `5xx`, brak odpowiedzi
+(błąd połączenia albo przekroczone 10 sekund) i każda odpowiedź `2xx` inna niż `202` —
+nawet taka, która wymienia post w polu `przyjete` — bo to nie jest przyjęcie przez bramę.
+Każda inna odpowiedź — `3xx` (np. przekierowanie) i `4xx` inne niż `408` i `429` — jest
+traktowana jak błąd konfiguracji.
 Gdy błąd dotyczy jednego postu z paczki (pole `element`), tryb awarii obsługuje tylko ten
 post, a pozostałe są wysyłane ponownie bez niego.
 

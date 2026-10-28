@@ -275,14 +275,94 @@ final class SubmitterTest extends TestCase
 		self::assertEqualsWithDelta($now + 60, (int) $this->board->row($id)['retry_at'], 2);
 	}
 
-	public function testASuccessThatIsNotTheGatewaysAcceptanceIsRetried(): void
+	/**
+	 * @return array<string,array{0:int,1:string|null}>
+	 */
+	public function successesThatAreNotTheGatewaysAcceptance(): array
 	{
-		$this->gateway->script[] = array('status' => 200, 'body' => '<html>Strona logowania</html>');
+		// The body: null for one naming every item sent in `przyjete`, as an acceptance would.
+		return array(
+			'a proxy\'s login page (200)'         => array(200, '<html>Strona logowania</html>'),
+			'a 200 whose przyjete names the post' => array(200, null),
+			'a 201 whose przyjete names the post' => array(201, null),
+			'a 204 without a body'                => array(204, ''),
+		);
+	}
+
+	/**
+	 * @dataProvider successesThatAreNotTheGatewaysAcceptance
+	 */
+	public function testOnlyA202AcceptsAnyOther2xxIsRetriedWithAPause(int $status, ?string $body): void
+	{
+		// The plugins' shared rule D9.6 (F5a): never a configuration error, never an acceptance.
+		$this->gateway->script[] = function (array $ids) use ($status, $body) {
+			return array('status' => $status, 'body' => ($body !== null) ? $body : json_encode(array('przyjete' => $ids)));
+		};
+		$now = time();
 
 		$id = $this->board->posting('Zwykły testowy wpis.')['post_id'];
 
-		self::assertSame(pending_store::QUEUED, $this->board->row($id)['status']);
-		self::assertSame(submitter::ERROR_ANSWER, $this->board->row($id)['error_code']);
+		$row = $this->board->row($id);
+		self::assertSame(array(pending_store::QUEUED, 'http_' . $status, ''), array($row['status'], $row['error_code'], $row['verdict']));
+		self::assertEqualsWithDelta($now + 60, (int) $row['retry_at'], 2, 'the backoff\'s first minute');
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertNull($this->board->settings->last_error(), 'not a configuration error');
+		self::assertSame(array(), $this->board->log->entries);
+		$pause = $this->board->settings->pause($now);
+		self::assertSame(array(settings::PAUSE_FOREIGN, 'http_' . $status), array($pause['kind'], $pause['code']), 'a pause, as after a 503');
+		self::assertEqualsWithDelta($now + 60, $pause['until'], 2);
+
+		// After the pause the cron task sends it again, and the gateway's 202 takes it.
+		$this->board->sweeper()->sweep($now + 61);
+		self::assertCount(2, $this->gateway->requests);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertNull($this->board->settings->pause($now + 61));
+	}
+
+	public function testA408IsANetworkFailureRetriedWithAPause(): void
+	{
+		// The plugins' shared rule D9.6 (F5a): 408 counts as no answer, not as a configuration error.
+		$this->gateway->script[] = array('status' => 408, 'body' => '<html>Request Timeout</html>');
+		$now = time();
+
+		$id = $this->board->posting('Zwykły testowy wpis.')['post_id'];
+
+		$row = $this->board->row($id);
+		self::assertSame(array(pending_store::QUEUED, 'http_408', ''), array($row['status'], $row['error_code'], $row['verdict']));
+		self::assertEqualsWithDelta($now + 60, (int) $row['retry_at'], 2);
+		self::assertNull($this->board->settings->last_error(), 'not a configuration error');
+		self::assertSame(array(), $this->board->log->entries);
+		self::assertSame(settings::PAUSE_UNAVAILABLE, $this->board->settings->pause($now)['kind']);
+	}
+
+	public function testA202AcceptsTheItemsItNamesAndTheRestIsRetried(): void
+	{
+		// Three posts queued behind a pause go in one batch; the 202 names two of them.
+		$this->gateway->refuse(503, 'kolejka_niedostepna');
+		$now = time();
+		$ids = array();
+		foreach (array('Pierwszy', 'Drugi', 'Trzeci') as $word)
+		{
+			$ids[] = $this->board->posting($word . ' testowy wpis.')['post_id'];
+		}
+		$left_out = 'phpbb:' . $ids[1];
+		$this->gateway->script[] = function (array $sent) use ($left_out) {
+			return array('status' => 202, 'body' => json_encode(array('przyjete' => array_values(array_diff($sent, array($left_out))))));
+		};
+
+		$this->board->sweeper()->sweep($now + 61);
+
+		self::assertCount(3, $this->gateway->items(1), 'one batch');
+		self::assertSame(array(pending_store::PENDING, pending_store::QUEUED, pending_store::PENDING), array(
+			$this->board->row($ids[0])['status'], $this->board->row($ids[1])['status'], $this->board->row($ids[2])['status']));
+		self::assertSame(submitter::ERROR_ANSWER, $this->board->row($ids[1])['error_code']);
+		self::assertEqualsWithDelta($now + 61 + 60, (int) $this->board->row($ids[1])['retry_at'], 2, 'its first attempt: the backoff\'s first minute');
+		self::assertNull($this->board->settings->pause($now + 61), 'the 202 ends the pause');
+
+		// The one left out goes again alone.
+		$this->board->sweeper()->sweep($now + 61 + 61);
+		self::assertSame(array('phpbb:' . $ids[1]), array_column($this->gateway->items(2), 'id'));
+		self::assertSame(pending_store::PENDING, $this->board->row($ids[1])['status']);
 	}
 
 	/**
@@ -497,8 +577,9 @@ final class SubmitterTest extends TestCase
 			'a full queue'               => array(429, 'kolejka_pelna', settings::PAUSE_OVERLOAD),
 			'a 503'                      => array(503, 'kolejka_niedostepna', settings::PAUSE_UNAVAILABLE),
 			'no answer at all'           => array(null, 'network', settings::PAUSE_UNAVAILABLE),
+			'a 408'                      => array(408, 'http_408', settings::PAUSE_UNAVAILABLE),
+			'a 2xx that is not a 202'    => array(200, 'http_200', settings::PAUSE_FOREIGN),
 			'a 500 does not pause'       => array(500, 'blad_wewnetrzny', null),
-			'a 2xx that is not an acceptance does not pause' => array(200, 'bad_answer', null),
 		);
 	}
 
@@ -511,9 +592,9 @@ final class SubmitterTest extends TestCase
 		{
 			$this->gateway->script[] = null;
 		}
-		else if ($status === 200)
+		else if ($status === 200 || $status === 408)
 		{
-			$this->gateway->script[] = array('status' => 200, 'body' => '{}');
+			$this->gateway->script[] = array('status' => $status, 'body' => '{}');
 		}
 		else
 		{

@@ -145,7 +145,9 @@ decision).
   of a retry no verdict could follow.
 - **One refused request, not one per post: the shared pause of sending** (audit K-39). Every
   `429` (the key's daily limit, its minute or in-flight limit, the shared ceiling, a full
-  queue, any other code), every `503` and no answer at all start the gateway's pause
+  queue, any other code), every `503`, a `408` (counted as no answer), no answer at all and
+  a `2xx` other than `202` (kind `foreign`: something else answered at the gateway's
+  address; the ACP says to check it) start the gateway's pause
   (`settings::record_pause`: the kind, the code and until when - `ponow_za_s`, capped at a
   day, or 60 s without it - in three `config` values from the `gateway_pause` and
   `shared_pause` migrations). While it lasts `submitter::submit` sends nothing: a post from an
@@ -153,8 +155,14 @@ decision).
   its next batch (`hold_back`). A row whose time-out comes before the pause ends gets the
   failure mode at once, with the pause's code (D9.3). Each refusal by the key's limits spends
   its allowance (the contract: only a refusal the key did not cause is free), hence the pause.
-  A `500`, `502`, `504` or a `2xx` that is not the gateway's acceptance is retried per row
-  and pauses nothing. The ACP shows the pause with its kind and hour, never the key or a
+  A `500`, `502` or `504` is retried per row and pauses nothing.
+- **Only `202` accepts** (the plugins' shared rule D9.6, client-php's `F5a`): a `202` accepts
+  each item its `przyjete` names, and an item it leaves out is retried (`bad_answer`, the
+  backoff) while the others wait for their webhooks; any other `2xx`, also one naming every
+  item, is retried with the backoff and pauses the sending as a `503` does (`http_<status>`),
+  never a configuration error; a `408` is a network failure (retried, a pause), not a
+  configuration error. `tests/EndToEnd` proves it over HTTP: a 200 naming the post, then a
+  408, at the gateway's address, then the mock's 202 and its verdict. The ACP shows the pause with its kind and hour, never the key or a
   body; the next `202` forgets it, and so does every save of the ACP form
   (`settings::save`): a new key or gateway address is tried at once, and a pause that still
   holds comes back after that one refused request.
@@ -236,13 +244,13 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | Suite | What it proves |
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
 | `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
-| `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
+| `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board; `foreign_router.php` answers at the gateway's address as something else would (a 200 naming every item, a 408), which is retried until the mock's 202. |
 | `tests/Repo` | The Claude Code rules, checked as properties of the agent files (a read-only agent lists its tools and none that writes - without the line it inherits all; a Sonnet agent that writes names every risk path in its "Risk list" block and none in its "You may change" block), each property broken once by an agent in `tests/Repo/fixtures/` that the check must reject; the language files; no PHP 8-only functions. |
 
 CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file and a package build.
