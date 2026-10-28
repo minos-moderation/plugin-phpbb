@@ -15,7 +15,8 @@ use minos\moderation\service\settings;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
- * The ACP page "Minos": the settings, the webhook URL to register with the key, the last
+ * The ACP page "Minos": the settings, the webhook URL to register with the key, the
+ * gateway's pause (a spent daily limit, an overload) until its next acceptance, the last
  * refusal of the gateway, and the posts the extension handled lately.
  *
  * The key and the secret are write-only here: the form never carries them back, the page
@@ -111,10 +112,16 @@ class acp
 			}
 			else
 			{
+				$was_enabled = $this->settings->enabled();
 				$errors = $this->settings->save($this->read_form());
 				if (!$errors)
 				{
 					$saved = true;
+					if (!$was_enabled && $this->settings->enabled())
+					{
+						// Switched on again: what waited is sent again, with a fresh time-out.
+						$this->store->restart_waiting(time());
+					}
 					$this->log->add('admin', $this->user->data['user_id'], $this->user->ip, 'LOG_MINOS_SETTINGS_UPDATED');
 				}
 			}
@@ -127,6 +134,7 @@ class acp
 		}
 
 		$last_error = $this->settings->last_error();
+		$pause = $this->settings->pause(time());
 		$counts = $this->store->counts() + array_fill_keys(pending_store::UNSETTLED, 0) + array(pending_store::HELD => 0);
 		$waiting = $counts[pending_store::QUEUED] + $counts[pending_store::PENDING] + $counts[pending_store::RECEIVED];
 		$this->template->assign_vars(array(
@@ -136,6 +144,7 @@ class acp
 			'ERROR_MSG'             => self::escape(implode('<br>', $messages), true),
 			'S_MINOS_READY'         => $this->settings->is_ready(),
 			'S_MINOS_ENABLED'       => $this->settings->enabled(),
+			'MINOS_NOT_READY'       => self::escape($this->language->lang('MINOS_ACP_NOT_READY', $this->problems_text())),
 			'MINOS_GATEWAY_URL'     => self::escape($this->shown_url()),
 			'MINOS_KEY_HINT'        => self::escape($this->settings->key_hint()),
 			'MINOS_SECRET_HINT'     => self::escape($this->settings->secret_hint()),
@@ -143,6 +152,9 @@ class acp
 			'MINOS_TIMEOUT_MIN_MIN' => settings::MIN_TIMEOUT_MIN,
 			'MINOS_TIMEOUT_MIN_MAX' => settings::MAX_TIMEOUT_MIN,
 			'MINOS_WEBHOOK_URL'     => self::escape($this->webhook_url()),
+			'S_MINOS_PAUSE'         => $pause !== null,
+			'MINOS_PAUSE'           => ($pause !== null) ? self::escape($this->language->lang('MINOS_PAUSE_' . strtoupper($pause['kind']),
+				$this->user->format_date($pause['until'], 'H:i'))) : '',
 			'S_MINOS_LAST_ERROR'    => $last_error !== null,
 			'MINOS_LAST_ERROR'      => ($last_error !== null) ? self::escape($last_error['status'] . ' ' . $last_error['code']) : '',
 			'MINOS_LAST_ERROR_HELP' => ($last_error !== null) ? self::escape($this->error_help($last_error['code'])) : '',
@@ -178,6 +190,21 @@ class acp
 				'TIME'       => $this->user->format_date((int) $row['submitted_at']),
 			));
 		}
+	}
+
+	/**
+	 * What keeps the extension from submitting posts, in the administrator's words.
+	 *
+	 * @return string
+	 */
+	protected function problems_text()
+	{
+		$problems = array();
+		foreach ($this->settings->problems() as $key)
+		{
+			$problems[] = $this->language->lang($key);
+		}
+		return implode(', ', $problems);
 	}
 
 	/**

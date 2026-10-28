@@ -79,6 +79,9 @@ final class MockGatewayTest extends TestCase
 		));
 
 		$posts = array();
+		// A neutral text under a title the gateway blocks: the title is assessed with the text.
+		$posts['blocked_title'] = $board->posting('Neutralna treść testowa.', 'post', array('title' => 'Tytuł testowy [minos:blokuj]'))['post_id'];
+		self::assertSame(pending_store::PENDING, $board->row($posts['blocked_title'])['status'], 'blocked_title: accepted by the mock');
 		foreach ($texts = array(
 			'safe'      => 'Testowy wpis o pogodzie.',
 			'blocked'   => 'Testowy wpis [minos:blokuj] [minos:kategoria=nekanie]',
@@ -104,12 +107,19 @@ final class MockGatewayTest extends TestCase
 		self::assertSame(pending_store::HELD, $board->row($posts['blocked'])['status']);
 		self::assertSame('nekanie', $board->row($posts['blocked'])['categories']);
 
+		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($posts['blocked_title'])['post_visibility']);
+		self::assertSame(pending_store::HELD, $board->row($posts['blocked_title'])['status']);
+		self::assertSame('zablokowane', $board->row($posts['blocked_title'])['verdict']);
+
 		self::assertSame(pending_store::MASKED, $board->row($posts['masked'])['status']);
-		$sent = $texts['masked'];
+		$title = $board->title($posts['masked']);
+		$sent = $title . "\n\n" . $texts['masked'];
 		$masked = $board->row($posts['masked'])['masked_text'];
 		self::assertSame(mb_strlen($sent, 'UTF-8'), mb_strlen($masked, 'UTF-8'), 'the masked text keeps the sent text\'s length');
 		self::assertSame(str_replace('słowem', '██████', $sent), $masked);
-		self::assertSame($board->xml($masked), $board->post($posts['masked'])['post_text']);
+		self::assertSame($board->xml(str_replace('słowem', '██████', $texts['masked'])), $board->post($posts['masked'])['post_text'],
+			'the post\'s text is masked, the title is not part of it');
+		self::assertSame($title, $board->title($posts['masked']));
 
 		self::assertSame('nieocenione', $board->row($posts['unassessed'])['verdict']);
 		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($posts['unassessed'])['post_visibility'], 'the default fail-closed');

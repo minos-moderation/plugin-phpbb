@@ -95,7 +95,7 @@ final class LateVerdictTest extends TestCase
 		$calls = count($this->board->visibility->calls);
 		$notified = count($this->board->notifications->calls);
 
-		$this->late($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ████████ słowo w teście.'));
+		$this->late($id, 'ocenzurowane', array('ocenzurowany' => $this->board->title($id) . "\n\nTo jest ████████ słowo w teście."));
 
 		$post = $this->board->post($id);
 		self::assertSame(ITEM_APPROVED, (int) $post['post_visibility']);
@@ -112,7 +112,7 @@ final class LateVerdictTest extends TestCase
 		$original = $this->board->post($id)['post_text'];
 		$this->board->db->pdo->exec('CREATE TRIGGER minos_test_text BEFORE UPDATE OF post_text ON phpbb_posts BEGIN SELECT RAISE(IGNORE); END');
 
-		$this->late($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ████████ słowo w teście.'));
+		$this->late($id, 'ocenzurowane', array('ocenzurowany' => $this->board->title($id) . "\n\nTo jest ████████ słowo w teście."));
 
 		$post = $this->board->post($id);
 		self::assertSame(ITEM_REAPPROVE, (int) $post['post_visibility'], 'the unmasked original does not stay published');
@@ -125,7 +125,7 @@ final class LateVerdictTest extends TestCase
 		$this->board->configure(array(settings::CENSORED => settings::CENSORED_PUBLISH));
 		$id = $this->published_by_fail_open('To jest brzydkie słowo w teście.');
 
-		$this->late($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ███ słowo w teście.'));
+		$this->late($id, 'ocenzurowane', array('ocenzurowany' => $this->board->title($id) . "\n\nTo jest ███ słowo w teście."));
 
 		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility']);
 		self::assertSame('mask_manual', $this->board->row($id)['error_code']);
@@ -221,7 +221,7 @@ final class LateVerdictTest extends TestCase
 		self::assertSame('1', $row['revision']);
 		self::assertSame(pending_store::PENDING, $row['status']);
 		$item = $this->gateway->items(1)[0];
-		self::assertSame(array('phpbb:' . $id . '.1', 'Druga treść, której brama nie widziała.'), array($item['id'], $item['tekst']));
+		self::assertSame(array('phpbb:' . $id . '.1', $this->board->title($id) . "\n\nDruga treść, której brama nie widziała."), array($item['id'], $item['tekst']));
 
 		self::assertSame(200, $this->late($id, 'bezpieczne'));
 		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the old verdict publishes nothing');
@@ -256,13 +256,18 @@ final class LateVerdictTest extends TestCase
 	 */
 	public function rowsWhoseTextChangesOutsideTheExtension(): array
 	{
-		return array('held by a time-out' => array('timeout'), 'waiting' => array('waiting'));
+		return array(
+			'held by a time-out' => array('timeout', 'text'),
+			'waiting' => array('waiting', 'text'),
+			'the title, held by a time-out' => array('timeout', 'title'),
+			'the title, waiting' => array('waiting', 'title'),
+		);
 	}
 
 	/**
 	 * @dataProvider rowsWhoseTextChangesOutsideTheExtension
 	 */
-	public function testAVerdictIsNeverAppliedToTextOtherThanTheTextSent(string $state): void
+	public function testAVerdictIsNeverAppliedToTextOtherThanTheTextSent(string $state, string $changed): void
 	{
 		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_CLOSED));
 		$id = $this->board->posting('Pierwsza, oceniana treść.')['post_id'];
@@ -271,7 +276,14 @@ final class LateVerdictTest extends TestCase
 			$this->board->sweeper()->sweep($this->timeout);
 		}
 		// Changed on a path the extension does not see (another extension, a script).
-		$this->board->db->sql_query("UPDATE phpbb_posts SET post_text = '<t>Treść podmieniona bez edycji.</t>' WHERE post_id = " . $id);
+		if ($changed === 'title')
+		{
+			$this->board->db->sql_query("UPDATE phpbb_topics SET topic_title = 'Tytuł podmieniony bez edycji' WHERE topic_first_post_id = " . $id);
+		}
+		else
+		{
+			$this->board->db->sql_query("UPDATE phpbb_posts SET post_text = '<t>Treść podmieniona bez edycji.</t>' WHERE post_id = " . $id);
+		}
 
 		self::assertSame(200, $this->late($id, 'bezpieczne'));
 

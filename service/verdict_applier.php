@@ -22,8 +22,9 @@ use minos\moderation\platform\forum;
  * A post a moderator already dealt with is left alone.
  *
  * A masked text is published only when it is the text sent with characters replaced by
- * `█`, and the text sent is exactly what the author wrote (see {@see forum::mask_fits});
- * otherwise the post is held for a moderator, with the masked text beside it.
+ * `█`, the title sent with it is untouched, and the text sent is exactly what the author
+ * wrote (see {@see forum::masked_body}); otherwise the post is held for a moderator, with the
+ * masked text beside it. The extension never changes a title.
  *
  * A post longer than 3000 characters was assessed on its beginning only: a block still
  * blocks, but nothing publishes it on the gateway's word. `bezpieczne` reads as
@@ -181,10 +182,15 @@ class verdict_applier
 		{
 			$post = $this->forum->load_post($post_id);
 			$sent = (string) $row['sent_md5'];
+			$text = ($post !== null) ? $this->forum->text_of($post) : '';
+			// The gateway's outcome is about the text sent, and only that text: without its digest
+			// it is about no known text. The extension's own outcomes (no answer, a refusal) are
+			// about no text; a digest they have is still checked.
+			$about_text = ($sent !== '' || !pending_store::is_own_outcome((string) $row['verdict']));
 			if ($post === null
 				|| ($late && !$this->forum->untouched_since_approval($post, $approved_at, (string) $row['approved_md5']))
 				|| (!$late && !$this->forum->awaits_approval($post))
-				|| ($sent !== '' && !hash_equals($sent, md5(forum::first_chars($this->forum->plain_text((string) $post['post_text']))))))
+				|| ($about_text && !hash_equals($sent, md5(forum::first_chars($text)))))
 			{
 				// Gone, dealt with by someone else, or no longer the text that was sent: the
 				// outcome is not about this post as it is, and that decision stands.
@@ -196,7 +202,7 @@ class verdict_applier
 
 			$verdict = (string) $row['verdict'];
 			$masked = ($row['masked_text'] !== '') ? (string) $row['masked_text'] : null;
-			$complete = !forum::is_cut($this->forum->plain_text((string) $post['post_text']));
+			$complete = !forum::is_cut($text);
 			$action = self::decide($verdict, $masked, $complete,
 				$this->settings->censored_mode(), $this->settings->blocked_mode(), $this->settings->fail_mode());
 			if ($late && !self::is_verdict($verdict, $complete))
@@ -206,12 +212,14 @@ class verdict_applier
 
 			$original = '';
 			$extra = array('truncated' => $complete ? 0 : 1, 'approved_at' => 0, 'approved_md5' => '');
+			// What replaces the post's text: the mask without the title, which is never changed.
+			$masked_body = ($action === self::PUBLISH_MASKED && !$mask_failed) ? $this->forum->masked_body($post, (string) $masked) : null;
 			if ($action === self::PUBLISH_MASKED && $mask_failed)
 			{
 				$action = self::HOLD;
 				$extra['error_code'] = self::MASK_FAILED;
 			}
-			else if ($action === self::PUBLISH_MASKED && !$this->forum->mask_fits($post, (string) $masked))
+			else if ($action === self::PUBLISH_MASKED && $masked_body === null)
 			{
 				$action = self::HOLD;
 				$extra['error_code'] = self::MASK_MANUAL;
@@ -272,7 +280,7 @@ class verdict_applier
 				break;
 
 				case self::PUBLISH_MASKED:
-					$masked_post = $this->forum->replace_text($post, (string) $masked);
+					$masked_post = $this->forum->replace_text($post, (string) $masked_body);
 					if ($masked_post === null)
 					{
 						$this->db->sql_transaction('rollback');

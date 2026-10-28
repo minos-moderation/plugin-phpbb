@@ -13,6 +13,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `ext.php` | Refuses to be enabled without phpBB 3.3, PHP 7.4, cURL or the bundled client. |
 | `client_loader.php` | Loads `Minos\Client` from the bundled `vendor/` (see "Composer"). |
 | `config/services.yml`, `config/routing.yml` | The services; the `POST /minos/webhook` route. |
+| `event/acp_notice.php`, `adm/style/event/` | Every ACP page: what is missing while the extension is switched on without a usable configuration. |
 | `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. |
 | `service/submitter.php`, `service/curl_transport.php` | `POST /api/v1/b2b/oceny` and every class of answer. |
 | `controller/webhook.php`, `service/receiver.php` | The receiving checklist: raw body, signature, payload, record. |
@@ -24,9 +25,10 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `cron/sweeper.php` | Every 5 minutes: time-outs, retries, leftovers, pruning. |
 | `acp/`, `controller/acp.php`, `adm/style/` | The ACP page. |
 | `styles/all/template/event/` | The MCP note above a queued post. |
-| `migrations/` | The table; the settings and the ACP module. |
+| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`). |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
+| `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
 | `.github/workflows/release.yml` | On a `v*` tag: builds the package, proves it with `.github/scripts/check-release-archive.sh` and attaches it to the GitHub Release. |
 
 ## The life of a post
@@ -36,6 +38,14 @@ A row of `minos_pending` moves `queued` → `pending` (the gateway said `202`) �
 `superseded` (a moderator acted first, or the post is gone). Every move is a conditional
 `UPDATE` checked by its affected-row count, so a repeated delivery, a webhook that
 overtakes its own `202`, and the cron task racing the webhook change a row once.
+
+The time-out counts from the gateway's `202` (`mark_pending` moves `submitted_at` to it),
+so the gateway always has its whole delivery window; a row the gateway never accepted counts
+from its queueing. The digest of the text (`sent_md5`) is stored when the request is
+prepared, before it leaves (`mark_sending`): a webhook that overtakes its own `202` is still
+checked against the text sent. A row without a digest takes no verdict from the gateway
+(nothing is recorded; it waits for its time-out or a new revision), and an outcome recorded
+without one is applied to nothing.
 
 `revision` counts edits while a post waits. The id sent is `phpbb:<post id>` for the first
 revision and `phpbb:<post id>.<revision>` after an edit; a verdict for another revision is
@@ -59,9 +69,54 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   waits for a human. An unrecognised stored value reads as fail-closed too.
 - **Switched off, the extension does nothing**: the webhook answers `404` before reading
   anything, nothing is sent, the cron task is not runnable. Held posts wait for moderators.
+  Switched on again in the ACP, every row still waiting (`queued`, `pending`) becomes a new
+  revision, queued with a fresh time-out (`pending_store::restart_waiting`; the plugins'
+  shared rule D9.13). Re-enabled in the extension manager with the setting left on, the cron
+  task resumes where it stopped (overdue rows get the failure mode).
+- **Switched on without a usable configuration, the failure mode** (shared rule D9.12): with
+  no key, no secret or no usable gateway address, new posts are held as usual and get the
+  failure mode at once (`refused`, `not_configured`), without a request; every ACP page says
+  what is missing (`event/acp_notice.php` on `core.adm_page_header`, rendered by
+  `adm/style/event/acp_overall_header_body_before.html`), never a stored value. A fresh
+  installation starts switched off. Finished rows - the original of a masked post, the
+  verdict - are kept 30 days (D9.11), pruned by the cron task.
+- **A link or a title without text to assess is the failure mode** (the plugins' shared rule
+  D9.5): a post whose text is empty but which holds a link (`<URL>`, also with a blank text a
+  reader cannot see) or carries a title (a new topic, a reply's own subject) is held and
+  gets the failure mode at once, without a request; the MCP notes "brak tekstu do oceny"
+  (`error_code` `empty_text`). A reply with no text, no link and the default subject
+  (attachments only) is not held. A title is never sent alone.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`) is left to the
   moderators and not sent: nothing would be done with its verdict.
+- **The title is assessed with the text** (the shared rule of the Minos plugins): the first
+  post of a topic is sent as the topic's title, decoded as a reader sees it, a blank line and
+  the post's text, all within the 3000 characters; a reply as its own subject and its text,
+  only when the author changed phpBB's default "Re: <title>". A title alone is never sent:
+  a post that carries a title (every new topic; a reply with a subject of its own, read
+  from `post_data['post_subject']` and `data['topic_title']` of
+  `core.posting_modify_submit_post_before`) but has no text to assess, such as `[b] [/b]`,
+  is held and gets the failure mode at once, as one with only a link does.
+  Each attempt reads the title from the topic, and `sent_md5` covers it, so a title changed
+  while the post waits is a new revision (an edit) or a verdict that no longer applies. A
+  masked text that touches the title (or the blank line) holds the post: the extension never
+  changes a title (`forum::masked_body`).
+- **The text sent is read from phpBB's stored XML** (`forum::plain_text`), not with phpBB's
+  `clean_formatting()`, which puts a space where every tag sat: `zak[b]a[/b]zane` would reach
+  the gateway as "zak a zane" (recorded in `tests/fixtures/phpbb-3.3/`). Inline formatting adds
+  nothing between words; `QUOTE`, `LIST`, `LI`, `CODE`, `br` and `p` start and end a line (one
+  line break, or the author's own); `<s>`/`<e>` (the typed markup) are dropped. A stored text
+  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing. The XML
+  parser is PHP's DOM, which phpBB 3.3 itself requires (its text formatter does).
+- **A refusal that outlasts the wait is the failure mode at once** (the plugins' shared rule
+  D9.3(a)): when `ponow_za_s`, taken as sent (not shortened to the retry cap), ends after a
+  row's time-out, the row gets the failure mode (`timeout`, with the refusal's code) instead
+  of a retry no verdict could follow. A `429` with `limit_dobowy_klucza` (the key's daily
+  limit) or `limit_globalny_b2b` / `kolejka_pelna` (an overload) is remembered as the
+  gateway's pause (`settings::record_pause`, two `config` values from the `gateway_pause`
+  migration: the kind and until when), shown in the ACP with the hour, and forgotten at the
+  next `202`. Only the kind and the moment are stored: never the key or a body. The retry
+  schedule is otherwise unchanged; a shared pause of sending is a later item.
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
@@ -103,16 +158,44 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers); `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
-| `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the gateway's pause (daily limit, overload) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
+| `tests/Posting` | Which posts are held (a link without text: the failure mode at once); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
-| `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id. |
+| `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
 
 CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file and a package build.
+Every action the workflows use is pinned to a full commit SHA with its version in a comment
+(`uses: owner/action@<40-hex sha>  # v1.2.3`), the same SHA in `tests.yml` and `release.yml`;
+to refresh a pin, resolve the release's tag to its commit (`git ls-remote
+https://github.com/<owner>/<action> refs/tags/<tag>`, the peeled `^{}` line for an annotated
+tag), check that the commit belongs to that release, and change the SHA and the comment
+together everywhere the action is used.
+
+## Text fixtures
+
+`tests/fixtures/phpbb-3.3/*.json` record, for invented posts only, what phpBB 3.3's real
+formatter stores (`xml`) and what its `clean_formatting()` and `unparse()` make of it, with
+the phpBB commit and version they came from. `tests/Text/RealFormatterFixtureTest.php` holds
+the `TextUtils` double and the extension's own text to them. To regenerate them (a session
+with network; the checkout stays outside the repository):
+
+```bash
+git clone https://github.com/phpbb/phpbb.git /tmp/phpbb && git -C /tmp/phpbb checkout 6c75df1
+composer install --no-dev --working-dir=/tmp/phpbb/phpBB
+php bin/phpbb-text-fixtures.php /tmp/phpbb tests/fixtures/phpbb-3.3
+```
+
+The generator builds phpBB's s9e factory, parser and utils as phpBB's own unit tests do
+(`set_s9e_services()` with the default BBCodes and the smilies and style of
+`tests/text_formatter/s9e/fixtures/default_formatting.xml`), parses each text with BBCode,
+smilies and links on, and writes one file per text. A new text goes into its `$corpus`.
+The current fixtures come from commit `6c75df15811d706e60694df86ccd487c98159656` (phpBB
+3.3.19, 2026-09-28).
 
 ## The mock gateway
 
@@ -190,6 +273,9 @@ a `release` environment with a required reviewer on the `publish` job.
 Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75df1`
 (2026-09-28), which is what the stubs copy:
 
+- `core.adm_page_header` (triggered first in `adm_page_header()`, `includes/functions_acp.php`)
+  and the ACP template event `acp_overall_header_body_before` (`adm/style/overall_header.html`,
+  first thing in `<body>`), checked on 3.3.x at `6c75df1`;
 - events `core.posting_modify_submit_post_before` (`data`, `mode`, `post_id`, `forum_id`),
   `core.submit_post_end` (`data` with `post_id`, `post_visibility`, `mode`),
   `core.mcp_queue_get_posts_modify_post_row`, `core.mcp_queue_approve_details_template`,
@@ -203,7 +289,10 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `mcp_queue::approve_posts()` as the model for the approval and its notifications
   (`notification_manager::add_notifications()` / `delete_notifications()`); the MCP queue
   listing ITEM_UNAPPROVED and ITEM_REAPPROVE posts;
-- `textformatter\utils_interface::clean_formatting()`, `unparse()`;
+- `textformatter\utils_interface::unparse()` (the mask check); `clean_formatting()` is in the
+  stub but not used for the text sent (see "Text fixtures"); the XML `s9e\TextFormatter`
+  stores (`<r>`/`<t>`, `<s>`/`<e>` markup, `QUOTE author`, `LIST`/`LI`, `CODE`, `<br/>`), run
+  through the real formatter for the fixtures;
   `parser_interface::parse()`, `disable_bbcodes()`, `disable_smilies()`,
   `disable_magic_url()` and their `enable_*`; `message_parser` feeding the parser raw text;
 - `log_interface::add()` with the `mod` and `critical` modes; `language::lang()` returning a

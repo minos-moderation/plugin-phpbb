@@ -4,6 +4,7 @@ namespace minos\moderation\tests\Extension;
 
 use minos\moderation\client_loader;
 use minos\moderation\ext;
+use minos\moderation\migrations\gateway_pause;
 use minos\moderation\migrations\install_data;
 use minos\moderation\migrations\install_schema;
 use minos\moderation\service\settings;
@@ -51,8 +52,9 @@ final class ExtensionTest extends TestCase
 		$config = new \phpbb\config\config();
 		$config_text = new \phpbb\config\db_text();
 		$migration = new install_data($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		$pause = new gateway_pause($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$modules = 0;
-		foreach ($migration->update_data() as $step)
+		foreach (array_merge($migration->update_data(), $pause->update_data()) as $step)
 		{
 			list($tool, $arguments) = $step;
 			if ($tool === 'config.add')
@@ -79,6 +81,9 @@ final class ExtensionTest extends TestCase
 		self::assertSame(settings::CENSORED_PUBLISH, $settings->censored_mode());
 		self::assertSame(settings::HOLD, $settings->blocked_mode());
 		self::assertSame(array(), $settings->forum_ids());
+		self::assertNull($settings->pause(time()), 'no pause of the gateway yet');
+		self::assertTrue($pause->effectively_installed());
+		self::assertSame(array('\minos\moderation\migrations\install_data'), gateway_pause::depends_on());
 		self::assertSame(2, $modules, 'a category and the settings page');
 		self::assertSame(array('\minos\moderation\migrations\install_schema'), install_data::depends_on());
 		self::assertSame(array('\phpbb\db\migration\data\v330\v330'), install_schema::depends_on());

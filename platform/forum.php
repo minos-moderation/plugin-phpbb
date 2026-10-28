@@ -32,6 +32,24 @@ class forum
 	/** What introduces a quote's author in the text sent (content, in Polish). */
 	const QUOTE_AUTHOR_SUFFIX = ' napisał(a):';
 
+	/** Elements of phpBB's stored XML that hold the markup as typed (`[b]`, `[/b]`), not text. */
+	const MARKUP_ELEMENTS = array('s', 'e');
+
+	/** Elements of phpBB's stored XML that a reader sees on lines of their own. */
+	const BLOCK_ELEMENTS = array('QUOTE', 'LIST', 'LI', 'CODE', 'br', 'p');
+
+	/** Marks a block's edge while a text is read; never in phpBB's XML (not an XML character). */
+	const BREAK_MARK = "\x00";
+
+	/** What separates a title from the post's text in the text sent: a blank line. */
+	const TITLE_SEPARATOR = "\n\n";
+
+	/** What phpBB puts before the topic's title in a reply's default subject. */
+	const REPLY_PREFIX = 'Re: ';
+
+	/** A link in phpBB's stored XML (a `[url]` or an automatic link). */
+	const LINK_PATTERN = '#<URL[\s>]#';
+
 	/** The most `meta.link_domains` the gateway keeps. */
 	const MAX_LINK_DOMAINS = 10;
 
@@ -116,13 +134,20 @@ class forum
 	}
 
 	/**
-	 * The words of a stored post, as the gateway should read them.
+	 * The words of a stored post, as the gateway should read them: as a reader sees them.
+	 *
+	 * Read from phpBB's stored XML here, not with phpBB's `clean_formatting()`: that one puts
+	 * a space where every BBCode tag sat, so `zak[b]a[/b]zane` would reach the gateway as
+	 * "zak a zane" while the reader sees one word (tests/fixtures/phpbb-3.3/). Inline
+	 * formatting (bold, colour, size, links, ...) adds nothing between the words; a block
+	 * (a quote, a list and its items, code, a line break) starts and ends a line.
 	 *
 	 * Quotes are kept, each introduced by its author ("Kasia napisał(a):"): whatever a post
-	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. The rest
-	 * loses its formatting (BBCode, links, smilies stay as their text), but the text of
-	 * `title` and `alt` attributes is kept, after the text: words can hide there as well.
-	 * The text is NOT shortened here.
+	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. Links,
+	 * images and smilies stay as their text, and the text of `title` and `alt` attributes is
+	 * kept, after the text: words can hide there as well. A stored text that is not phpBB's
+	 * XML is read with its markup, so that nothing in it is hidden. The text is NOT shortened
+	 * here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
 	 * @return string The plain text, trimmed.
@@ -134,19 +159,26 @@ class forum
 		{
 			return '';
 		}
-		$xml = (string) preg_replace_callback('#<QUOTE\b([^>]*)>#', function (array $m) {
-			$author = preg_match('/\sauthor="([^"]*)"/', $m[1], $found)
-				? trim(html_entity_decode($found[1], ENT_QUOTES | ENT_XML1, 'UTF-8')) : '';
-			$line = ($author !== '') ? htmlspecialchars($author . self::QUOTE_AUTHOR_SUFFIX, ENT_NOQUOTES, 'UTF-8') . "\n" : '';
-			return "\n" . $m[0] . $line;
-		}, $xml);
-		$xml = str_replace('</QUOTE>', "</QUOTE>\n", $xml);
-		$text = (string) $this->text_utils->clean_formatting($xml);
-		preg_match_all('/\s(?:title|alt)="([^"]*)"/', $xml, $found);
-		foreach ($found[1] as $attribute)
+		$dom = new \DOMDocument();
+		$errors = libxml_use_internal_errors(true);
+		$loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE);
+		libxml_clear_errors();
+		libxml_use_internal_errors($errors);
+		if (!$loaded || $dom->documentElement === null || $dom->doctype !== null)
 		{
-			$attribute = trim(html_entity_decode($attribute, ENT_QUOTES | ENT_XML1, 'UTF-8'));
-			if ($attribute !== '')
+			$text = html_entity_decode(strip_tags($xml), ENT_QUOTES, 'UTF-8');
+		}
+		else
+		{
+			$attributes = array();
+			$text = $this->node_text($dom->documentElement, $attributes);
+			// A block boundary is one line break, unless the author's own line breaks are there.
+			// (The pattern names the mark as \x00: PHP before 8.2 refuses a NUL byte in a pattern.)
+			$text = (string) preg_replace_callback('/[\x00\n]+/', function (array $m) {
+				$lines = substr_count($m[0], "\n");
+				return str_repeat("\n", max(1, $lines));
+			}, $text);
+			foreach ($attributes as $attribute)
 			{
 				$text .= "\n" . $attribute;
 			}
@@ -154,6 +186,113 @@ class forum
 		$text = str_replace(array("\r\n", "\r"), "\n", $text);
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
 		return is_string($trimmed) ? $trimmed : trim($text);
+	}
+
+	/**
+	 * The text of an element of phpBB's stored XML, with a {@see BREAK_MARK} at each block's
+	 * edges; collects the `title` and `alt` attributes on the way, in document order.
+	 *
+	 * @param \DOMNode         $node       The element.
+	 * @param array<int,string> $attributes The attributes' texts found so far.
+	 * @return string
+	 */
+	protected function node_text(\DOMNode $node, array &$attributes)
+	{
+		$text = '';
+		foreach ($node->childNodes as $child)
+		{
+			if ($child instanceof \DOMText)
+			{
+				$text .= $child->data;
+				continue;
+			}
+			if (!$child instanceof \DOMElement || in_array($child->nodeName, self::MARKUP_ELEMENTS, true))
+			{
+				continue;
+			}
+			foreach ($child->attributes as $attribute)
+			{
+				$value = in_array($attribute->nodeName, array('title', 'alt'), true) ? trim($attribute->nodeValue) : '';
+				if ($value !== '')
+				{
+					$attributes[] = $value;
+				}
+			}
+			$inner = $this->node_text($child, $attributes);
+			if ($child->nodeName === 'QUOTE')
+			{
+				$author = trim($child->getAttribute('author'));
+				$text .= self::BREAK_MARK . (($author !== '') ? $author . self::QUOTE_AUTHOR_SUFFIX . self::BREAK_MARK : '') . $inner . self::BREAK_MARK;
+			}
+			else if (in_array($child->nodeName, self::BLOCK_ELEMENTS, true))
+			{
+				$text .= self::BREAK_MARK . $inner . self::BREAK_MARK;
+			}
+			else
+			{
+				$text .= $inner;
+			}
+		}
+		return $text;
+	}
+
+	/**
+	 * The title a reader sees above a post, when it belongs in the text sent: the topic's
+	 * title for the first post of a topic; for a reply, its own subject, only when the author
+	 * wrote one (phpBB fills in "Re: " and the topic's title, which tells nothing new).
+	 *
+	 * phpBB stores titles HTML-escaped (and characters beyond the BMP as numeric entities);
+	 * the title is decoded once, to what the reader sees.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string The title, trimmed, or '' for none.
+	 */
+	public function title_of(array $post)
+	{
+		return self::own_title(isset($post['topic_title']) ? (string) $post['topic_title'] : '',
+			isset($post['post_subject']) ? (string) $post['post_subject'] : '',
+			(int) $post['post_id'] === (int) $post['topic_first_post_id']);
+	}
+
+	/**
+	 * {@see title_of} from the stored values, also before the post is stored: the topic's
+	 * title for the first post of a topic; for a reply, its own subject unless it is phpBB's
+	 * default ("Re: " and the topic's title) or the topic's title itself.
+	 *
+	 * @param string $topic_title The topic's title, as phpBB stores it.
+	 * @param string $subject     The post's subject, as phpBB stores it.
+	 * @param bool   $first_post  Whether the post opens the topic.
+	 * @return string The title, decoded and trimmed, or '' for none.
+	 */
+	public static function own_title($topic_title, $subject, $first_post)
+	{
+		$topic_title = self::decoded_line((string) $topic_title);
+		if ($first_post)
+		{
+			return $topic_title;
+		}
+		$subject = self::decoded_line((string) $subject);
+		$default = ((strpos($topic_title, self::REPLY_PREFIX) === 0) ? '' : self::REPLY_PREFIX) . $topic_title;
+		return ($subject === $default || $subject === $topic_title) ? '' : $subject;
+	}
+
+	/**
+	 * The whole text the gateway reads for a post: its title ({@see title_of}), a blank line
+	 * and the post's plain text ({@see plain_text}). A title alone is never sent: without
+	 * text to assess in the post itself, the result is ''. The text is NOT shortened here.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string
+	 */
+	public function text_of(array $post)
+	{
+		$text = $this->plain_text((string) $post['post_text']);
+		if ($text === '')
+		{
+			return '';
+		}
+		$title = $this->title_of($post);
+		return ($title !== '') ? $title . self::TITLE_SEPARATOR . $text : $text;
 	}
 
 	/**
@@ -174,39 +313,57 @@ class forum
 	/**
 	 * Whether the gateway's masked text can replace the post's text as it is.
 	 *
-	 * Only when (a) it is the text sent with some characters replaced by `█` - the same
-	 * length in characters, every other character unchanged - and (b) the text sent is exactly
-	 * what the author wrote: no BBCode, quote or attribute text was transformed on the way out,
-	 * so publishing the masked text changes nothing but the masked characters. Anything else
-	 * is for a moderator to apply by hand.
-	 *
 	 * @param array<string,mixed> $post   A row from {@see load_post}.
 	 * @param string              $masked The gateway's `ocenzurowany`.
 	 * @return bool
+	 * @see masked_body
 	 */
 	public function mask_fits(array $post, $masked)
 	{
-		$sent = self::first_chars($this->plain_text((string) $post['post_text']));
+		return $this->masked_body($post, $masked) !== null;
+	}
+
+	/**
+	 * The post's new text when the gateway's masked text can replace it as it is, or null.
+	 *
+	 * Only when (a) it is the text sent ({@see text_of}, whole) with some characters replaced
+	 * by `█` - the same length in characters, every other character unchanged; (b) the title
+	 * sent with it is untouched: the extension never changes a title, so a mask in the title
+	 * is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
+	 * BBCode, quote or attribute text was transformed on the way out, so publishing the masked
+	 * text changes nothing but the masked characters. Anything else is for a moderator to
+	 * apply by hand.
+	 *
+	 * @param array<string,mixed> $post   A row from {@see load_post}.
+	 * @param string              $masked The gateway's `ocenzurowany`.
+	 * @return string|null The masked text without the title: what replaces the post's text.
+	 */
+	public function masked_body(array $post, $masked)
+	{
+		$body = $this->plain_text((string) $post['post_text']);
 		$raw = str_replace(array("\r\n", "\r"), "\n", (string) $this->text_utils->unparse((string) $post['post_text']));
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $raw);
-		if ($sent === '' || $sent !== (is_string($trimmed) ? $trimmed : trim($raw)))
+		$text = $this->text_of($post);
+		if ($body === '' || $body !== (is_string($trimmed) ? $trimmed : trim($raw)) || self::first_chars($text) !== $text)
 		{
-			return false;
+			return null;
 		}
-		$sent_chars = preg_split('//u', $sent, -1, PREG_SPLIT_NO_EMPTY);
+		$sent_chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
 		$masked_chars = preg_split('//u', (string) $masked, -1, PREG_SPLIT_NO_EMPTY);
 		if (!is_array($sent_chars) || !is_array($masked_chars) || count($sent_chars) !== count($masked_chars))
 		{
-			return false;
+			return null;
 		}
+		// Everything before the post's own text: the title and the blank line.
+		$title_chars = count($sent_chars) - mb_strlen($body, 'UTF-8');
 		foreach ($masked_chars as $i => $char)
 		{
-			if ($char !== $sent_chars[$i] && $char !== self::MASK)
+			if ($char !== $sent_chars[$i] && ($char !== self::MASK || $i < $title_chars))
 			{
-				return false;
+				return null;
 			}
 		}
-		return true;
+		return implode('', array_slice($masked_chars, $title_chars));
 	}
 
 	/**
@@ -242,7 +399,7 @@ class forum
 			}
 		}
 		$meta = array(
-			'links'        => min(self::MAX_LINKS, (int) preg_match_all('#<URL[\s>]#', $xml)),
+			'links'        => min(self::MAX_LINKS, (int) preg_match_all(self::LINK_PATTERN, $xml)),
 			'link_domains' => array_values($domains),
 		);
 		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
@@ -251,6 +408,17 @@ class forum
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
+	}
+
+	/**
+	 * Whether a stored text holds a link - also one a reader cannot see, with a blank text.
+	 *
+	 * @param string $xml The stored text (`post_text`).
+	 * @return bool
+	 */
+	public static function has_link($xml)
+	{
+		return (bool) preg_match(self::LINK_PATTERN, (string) $xml);
 	}
 
 	/**
@@ -273,6 +441,20 @@ class forum
 		$count = count($labels);
 		$take = ($count >= 3 && strlen($labels[$count - 1]) === 2 && in_array($labels[$count - 2], self::SECOND_LEVEL_LABELS, true)) ? 3 : 2;
 		return implode('.', array_slice($labels, -$take));
+	}
+
+	/**
+	 * A one-line text as phpBB stores it (a subject: HTML-escaped, numeric entities for
+	 * characters beyond the BMP), decoded once and trimmed.
+	 *
+	 * @param string $stored The stored value.
+	 * @return string
+	 */
+	protected static function decoded_line($stored)
+	{
+		$text = str_replace(array("\r\n", "\r", "\n"), ' ', html_entity_decode((string) $stored, ENT_QUOTES, 'UTF-8'));
+		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
+		return is_string($trimmed) ? $trimmed : trim($text);
 	}
 
 	/**

@@ -194,19 +194,35 @@ class Board
 	 * @param string $text    The post's plain text (stored the way the parser stores it).
 	 * @param string $mode    `post`, `reply` or `quote`.
 	 * @param array  $options forum_id, poster_id, topic_id (for a reply), xml (a stored text),
-	 *     data (phpBB's post data as other extensions left it).
+	 *     data (phpBB's post data as other extensions left it), title (of a new topic) or
+	 *     subject (of a reply), both as phpBB stores them (HTML-escaped).
 	 * @return array{post_id:int,visibility:int,data:array} The post and what phpBB stored.
 	 */
 	public function posting($text, $mode = 'post', array $options = array())
 	{
 		$forum_id = isset($options['forum_id']) ? $options['forum_id'] : self::FORUM;
 		$xml = isset($options['xml']) ? $options['xml'] : $this->xml($text);
+		// What posting.php passes: the subject typed (`post_data`), and the topic's title, or a
+		// new topic's subject (`data`).
+		if (empty($options['topic_id']))
+		{
+			$options['title'] = isset($options['title']) ? $options['title'] : 'Temat testowy ' . $this->next_topic;
+			$topic_title = $options['title'];
+			$subject = $options['title'];
+		}
+		else
+		{
+			$topic_title = $this->topic_title((int) $options['topic_id']);
+			$options['subject'] = isset($options['subject']) ? $options['subject'] : 'Re: ' . $topic_title;
+			$subject = $options['subject'];
+		}
 		$before = new \phpbb\event\data(array(
-			'mode'     => $mode,
-			'data'     => (isset($options['data']) ? $options['data'] : array()) + array('message' => $xml, 'forum_id' => $forum_id),
-			'forum_id' => $forum_id,
-			'post_id'  => 0,
-			'topic_id' => isset($options['topic_id']) ? $options['topic_id'] : 0,
+			'mode'      => $mode,
+			'data'      => (isset($options['data']) ? $options['data'] : array()) + array('message' => $xml, 'forum_id' => $forum_id, 'topic_title' => $topic_title),
+			'post_data' => array('post_subject' => $subject),
+			'forum_id'  => $forum_id,
+			'post_id'   => 0,
+			'topic_id'  => isset($options['topic_id']) ? $options['topic_id'] : 0,
 		));
 		$this->listener->hold_for_assessment($before);
 		$data = $before['data'];
@@ -233,11 +249,13 @@ class Board
 	/**
 	 * phpBB's posting flow for an edit.
 	 *
-	 * @param int    $post_id The post.
-	 * @param string $text    Its new plain text.
+	 * @param int         $post_id The post.
+	 * @param string      $text    Its new plain text.
+	 * @param string|null $title   Its new subject (as stored); for a topic's first post also
+	 *     the topic's title, as phpBB changes both.
 	 * @return void
 	 */
-	public function edit($post_id, $text)
+	public function edit($post_id, $text, $title = null)
 	{
 		$post = $this->post($post_id);
 		$before = new \phpbb\event\data(array(
@@ -253,7 +271,12 @@ class Board
 		$this->db->sql_query('UPDATE ' . self::PREFIX . 'posts SET ' . $this->db->sql_build_array('UPDATE', array(
 			'post_text'       => $this->xml($text),
 			'post_visibility' => $visibility,
-		)) . ' WHERE post_id = ' . (int) $post_id);
+		) + (($title !== null) ? array('post_subject' => $title) : array())) . ' WHERE post_id = ' . (int) $post_id);
+		if ($title !== null)
+		{
+			$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET topic_title = '" . $this->db->sql_escape($title) . "'
+				WHERE topic_first_post_id = " . (int) $post_id);
+		}
 		$this->listener->send_for_assessment(new \phpbb\event\data(array(
 			'mode'            => 'edit',
 			'data'            => $data,
@@ -310,6 +333,35 @@ class Board
 	}
 
 	/**
+	 * The stored title of a topic (HTML-escaped, as phpBB stores it).
+	 *
+	 * @param int $topic_id
+	 * @return string '' for no such topic.
+	 */
+	public function topic_title($topic_id)
+	{
+		$result = $this->db->sql_query('SELECT topic_title FROM ' . self::PREFIX . 'topics WHERE topic_id = ' . (int) $topic_id);
+		$topic = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $topic ? (string) $topic['topic_title'] : '';
+	}
+
+	/**
+	 * The stored title of a post's topic (HTML-escaped, as phpBB stores it).
+	 *
+	 * @param int $post_id
+	 * @return string
+	 */
+	public function title($post_id)
+	{
+		$result = $this->db->sql_query('SELECT t.topic_title FROM ' . self::PREFIX . 'topics t
+			INNER JOIN ' . self::PREFIX . 'posts p ON p.topic_id = t.topic_id WHERE p.post_id = ' . (int) $post_id);
+		$row = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return (string) $row['topic_title'];
+	}
+
+	/**
 	 * The extension's row of a post.
 	 *
 	 * @param int $post_id
@@ -334,9 +386,12 @@ class Board
 	/**
 	 * Stores a post (and, for a new topic, its topic) as `submit_post()` would.
 	 *
+	 * A new topic's title is "Temat testowy <topic id>" unless `title` says otherwise; a reply's
+	 * subject is phpBB's default, "Re: " and the topic's title, unless `subject` says otherwise.
+	 *
 	 * @param string $xml        The stored text.
 	 * @param int    $visibility Its visibility.
-	 * @param array  $options    forum_id, poster_id, topic_id.
+	 * @param array  $options    forum_id, poster_id, topic_id, title, subject.
 	 * @return int The post id.
 	 */
 	public function write_post($xml, $visibility, array $options = array())
@@ -349,6 +404,11 @@ class Board
 		if ($new_topic)
 		{
 			$topic_id = $this->next_topic++;
+			$subject = isset($options['title']) ? (string) $options['title'] : 'Temat testowy ' . $topic_id;
+		}
+		else
+		{
+			$subject = isset($options['subject']) ? (string) $options['subject'] : 'Re: ' . $this->topic_title($topic_id);
 		}
 		$this->db->sql_query('INSERT INTO ' . self::PREFIX . 'posts ' . $this->db->sql_build_array('INSERT', array(
 			'topic_id'        => $topic_id,
@@ -357,7 +417,7 @@ class Board
 			'poster_ip'       => self::USER_IP,
 			'post_time'       => $now,
 			'post_visibility' => (int) $visibility,
-			'post_subject'    => 'Temat testowy ' . $topic_id,
+			'post_subject'    => $subject,
 			'post_text'       => $xml,
 			'post_username'   => '',
 			'post_checksum'   => md5($xml),
@@ -371,7 +431,7 @@ class Board
 			$this->db->sql_query('INSERT INTO ' . self::PREFIX . 'topics ' . $this->db->sql_build_array('INSERT', array(
 				'topic_id'             => $topic_id,
 				'forum_id'             => $forum_id,
-				'topic_title'          => 'Temat testowy ' . $topic_id,
+				'topic_title'          => $subject,
 				'topic_first_post_id'  => $post_id,
 				'topic_last_post_id'   => $post_id,
 				'topic_time'           => $now,

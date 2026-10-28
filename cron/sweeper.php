@@ -25,8 +25,10 @@ use minos\moderation\service\verdict_applier;
  * 4. forgets finished rows after 30 days.
  *
  * Switched off, the extension does nothing, and neither does the task: no time-outs, no
- * retries. The posts it held wait in phpBB's queue for a moderator; switched on again, the
- * task picks up where it stopped.
+ * retries, no pruning. The posts it held wait in phpBB's queue for a moderator. Switched on
+ * again in the ACP, the posts still waiting are sent again with a fresh time-out
+ * ({@see \minos\moderation\service\pending_store::restart_waiting}); re-enabled in the
+ * extension manager, the task picks up where it stopped.
  */
 class sweeper extends \phpbb\cron\task\base
 {

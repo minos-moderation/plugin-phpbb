@@ -1,0 +1,9 @@
+{
+    "phpbb_commit": "6c75df15811d706e60694df86ccd487c98159656",
+    "phpbb_version": "3.3.19",
+    "generator": "bin/phpbb-text-fixtures.php",
+    "bbcode": "to jest zak[b]a[/b]zane słowo i [i][/i]dru[color=#000000]gie[/color]",
+    "xml": "<r>to jest zak<B><s>[b]</s>a<e>[/b]</e></B>zane słowo i <I><s>[i]</s><e>[/i]</e></I>dru<COLOR color=\"#000000\"><s>[color=#000000]</s>gie<e>[/color]</e></COLOR></r>",
+    "clean_formatting": "to jest zak a zane słowo i   dru gie ",
+    "unparse": "to jest zak[b]a[/b]zane słowo i [i][/i]dru[color=#000000]gie[/color]"
+}

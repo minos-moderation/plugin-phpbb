@@ -19,14 +19,15 @@ if (empty($lang) || !is_array($lang))
 }
 
 $lang = array_merge($lang, array(
-	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu (pierwsze 3000 znaków, z cytatami i ich autorami, bez formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora. Nigdy nie są wysyłane dane konta autora (e-mail, adres IP, identyfikator, login); jedyne imiona i nazwy, które trafiają do bramy, to te wpisane w treść postu, np. autorzy cytatów, bo brama ocenia je jako część tekstu.',
+	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu, przy nowym temacie poprzedzony tytułem, a przy odpowiedzi — jej własnym tematem, jeśli autor zmienił domyślny „Re: …” (razem pierwsze 3000 znaków, z cytatami i ich autorami, bez formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora. Nigdy nie są wysyłane dane konta autora (e-mail, adres IP, identyfikator, login); jedyne imiona i nazwy, które trafiają do bramy, to te wpisane w treść postu, np. autorzy cytatów, bo brama ocenia je jako część tekstu.',
 	'MINOS_ACP_SAVED'            => 'Ustawienia zostały zapisane.',
-	'MINOS_ACP_NOT_READY'        => 'Rozszerzenie nie wstrzymuje teraz żadnych postów: włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
+	'MINOS_ACP_NOT_READY'        => 'Ocenianie jest włączone, ale rozszerzenie nie może wysyłać postów do oceny (%s). Do czasu uzupełnienia ustawień każdy nowy post od razu obsługuje tryb awarii (fail-closed: czeka na moderatora; fail-open: jest publikowany bez oceny).',
+	'MINOS_ACP_OFF'              => 'Ocenianie jest wyłączone: rozszerzenie nic nie robi, a nowe posty publikują się jak dawniej. Włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
 	'MINOS_ACP_READY'            => 'Rozszerzenie działa: nowe posty są oceniane przed publikacją.',
 
 	'MINOS_SETTINGS'             => 'Ustawienia',
 	'MINOS_ENABLED'              => 'Oceniaj nowe posty',
-	'MINOS_ENABLED_EXPLAIN'      => 'Wyłączone rozszerzenie nic nie robi: nowe posty publikują się jak dawniej, nic nie jest wysyłane do bramy, a werdykty są odrzucane (webhook odpowiada 404). Posty, które czekały na werdykt, zostają w kolejce do decyzji moderatora.',
+	'MINOS_ENABLED_EXPLAIN'      => 'Wyłączone rozszerzenie nic nie robi: nowe posty publikują się jak dawniej, nic nie jest wysyłane do bramy, a werdykty są odrzucane (webhook odpowiada 404). Posty, które czekały na werdykt, zostają w kolejce do decyzji moderatora; po ponownym włączeniu są wysyłane do oceny od nowa, z nowym czasem oczekiwania.',
 	'MINOS_GATEWAY_URL'          => 'Adres bramy',
 	'MINOS_GATEWAY_URL_EXPLAIN'  => 'Zwykle https://gateway.wergiliusz.app. Tylko https:// (http:// wyłącznie dla localhost, do testów z atrapą bramy).',
 	'MINOS_API_KEY'              => 'Klucz API',
@@ -44,7 +45,7 @@ $lang = array_merge($lang, array(
 	'MINOS_FAIL_MODE_FAIL_OPEN'  => 'Publikuj (fail-open)',
 	'MINOS_FAIL_MODE_FAIL_CLOSED' => 'Zostaw w kolejce do zatwierdzenia (fail-closed)',
 	'MINOS_TIMEOUT'              => 'Czas oczekiwania na werdykt',
-	'MINOS_TIMEOUT_EXPLAIN'      => 'W minutach, co najmniej 20. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (i zapasie) post obsługuje tryb awarii. Jeśli tryb fail-open opublikował post, a werdykt przyjdzie później, zostanie zastosowany, chyba że moderator lub autor zmienił już post.',
+	'MINOS_TIMEOUT_EXPLAIN'      => 'W minutach, co najmniej 20, liczone od przyjęcia postu przez bramę (a dla postu, którego brama jeszcze nie przyjęła — od jego wstrzymania). Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (i zapasie) post obsługuje tryb awarii. Jeśli tryb fail-open opublikował post, a werdykt przyjdzie później, zostanie zastosowany, chyba że moderator lub autor zmienił już post.',
 	'MINOS_CENSORED'             => 'Werdykt „ocenzurowane”',
 	'MINOS_CENSORED_EXPLAIN'     => 'Publikacja zastępuje tekst postu wersją z zamaskowanymi fragmentami (bez formatowania). Post dłuższy niż 3000 znaków zawsze zostaje w kolejce: brama widziała tylko jego początek. Z tego samego powodu werdykt „bezpieczne” dla takiego postu obsługuje tryb awarii.',
 	'MINOS_CENSORED_PUBLISH'     => 'Publikuj tekst z zamaskowanymi fragmentami',
@@ -59,6 +60,9 @@ $lang = array_merge($lang, array(
 
 	'MINOS_WEBHOOK'              => 'Adres webhooka',
 	'MINOS_WEBHOOK_EXPLAIN'      => 'Przekaż ten adres operatorowi bramy przy rejestracji klucza. Musi być publicznym adresem https:// w domenie forum; brama nie wysyła werdyktów na adresy IP ani przez przekierowania.',
+
+	'MINOS_PAUSE_LIMIT'          => 'Dzienny limit zapytań klucza jest wyczerpany do %s. Do tego czasu nowe posty trafiają do trybu awarii (fail-closed: czekają na moderatora; fail-open: są publikowane bez oceny).',
+	'MINOS_PAUSE_OVERLOAD'       => 'Brama jest przeciążona i nie przyjmuje postów do %s. Posty czekają i są wysyłane ponownie; post, którego brama nie przyjmie w czasie oczekiwania na werdykt, trafia do trybu awarii (fail-closed: czeka na moderatora; fail-open: jest publikowany bez oceny).',
 
 	'MINOS_LAST_ERROR'           => 'Ostatni błąd konfiguracji',
 	'MINOS_LAST_ERROR_EXPLAIN'   => 'Brama odrzuciła żądanie, a posty obsłużono zgodnie z trybem awarii. Wpis jest też w dzienniku błędów.',

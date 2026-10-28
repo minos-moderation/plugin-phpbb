@@ -85,7 +85,9 @@ final class FailureIsolationTest extends TestCase
 
 		$this->board->sweeper()->sweep(time() + 61);
 
-		self::assertCount(3, $this->gateway->items(3), 'one batch');
+		$ids = array_column($this->gateway->items(3), 'id');
+		self::assertSame(array('phpbb:' . $this->posts[0], 'phpbb:' . $this->posts[2]), $ids,
+			'one batch, without the row whose digest could not be stored before sending');
 		self::assertSame(pending_store::PENDING, $this->board->row($this->posts[0])['status']);
 		self::assertSame(pending_store::QUEUED, $this->board->row($this->posts[1])['status']);
 		self::assertSame(pending_store::PENDING, $this->board->row($this->posts[2])['status']);

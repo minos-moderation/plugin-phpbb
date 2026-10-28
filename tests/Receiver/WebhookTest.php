@@ -189,20 +189,85 @@ final class WebhookTest extends TestCase
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 	}
 
+	public function testAVerdictThatOvertakesTheGatewaysAcceptanceStillChecksTheTextSent(): void
+	{
+		// Audit probe 3 A, the other way round: the webhook arrives before the extension handles
+		// its own 202, after the text changed on a path the extension does not see.
+		$gateway = new class() extends \minos\moderation\tests\Fake\RecordingTransport {
+			/** @var callable|null */
+			public $before_answer;
+
+			public function post($url, array $headers, $body, $timeout_s)
+			{
+				$answer = parent::post($url, $headers, $body, $timeout_s);
+				if ($this->before_answer !== null)
+				{
+					call_user_func($this->before_answer, json_decode($body, true)['elementy'][0]['id']);
+				}
+				return $answer;
+			}
+		};
+		$board = Board::open(':memory:', $gateway);
+		$gateway->before_answer = static function (string $id) use ($board) {
+			$board->db->sql_query("UPDATE phpbb_posts SET post_text = '<t>Treść podmieniona, której brama nie widziała.</t>' WHERE post_id = " . (int) substr($id, 6));
+			$board->deliver(array('id' => $id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne'));
+		};
+
+		$id = $board->posting('Pierwsza, oceniana treść.')['post_id'];
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($id)['post_visibility'], 'the changed text is not published');
+		self::assertSame(pending_store::SUPERSEDED, $board->row($id)['status']);
+	}
+
+	public function testAVerdictForARevisionWhoseTextWasNeverSentIsNotApplied(): void
+	{
+		$id = $this->pending();
+		// A row without the digest of a text sent (as no row of this version can be).
+		$this->board->db->sql_query("UPDATE phpbb_minos_pending SET sent_md5 = '' WHERE post_id = " . $id);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne')));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(array(pending_store::PENDING, ''), array($this->board->row($id)['status'], $this->board->row($id)['verdict']),
+			'nothing is recorded: the row keeps waiting for its time-out');
+		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
+		self::assertSame(array(pending_store::HELD, pending_store::VERDICT_TIMEOUT), array($this->board->row($id)['status'], $this->board->row($id)['verdict']),
+			'the failure mode, the default fail-closed');
+	}
+
+	public function testARecordedVerdictWithoutTheDigestOfTheTextSentIsNotApplied(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));
+		$id = $this->pending();
+		$body = json_encode(self::verdict($id, 'bezpieczne'));
+		$controller = new webhook(new Request(array('X-Wergiliusz-Podpis' => Signature::sign(Board::SECRET, $body, time())), $body),
+			$this->board->receiver, $this->board->deferred, $this->board->dispatcher);
+		self::assertSame(200, $controller->handle()->getStatusCode());
+		self::assertSame(pending_store::RECEIVED, $this->board->row($id)['status'], 'recorded, not applied yet');
+		$this->board->db->sql_query("UPDATE phpbb_minos_pending SET sent_md5 = '' WHERE post_id = " . $id);
+
+		$this->board->dispatcher->terminate();
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'an outcome about no known text publishes nothing');
+		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
+	}
+
 	public function testCensoredWithPublishReplacesTheTextAndKeepsTheOriginal(): void
 	{
 		$id = $this->pending('To jest brzydkie słowo w teście.');
 		$original = $this->board->post($id)['post_text'];
 
+		$title = $this->board->title($id);
+
 		$this->board->deliver(self::verdict($id, 'ocenzurowane', array(
 			'kategorie'    => array('wulgaryzmy'),
-			'ocenzurowany' => 'To jest ████████ słowo w teście.',
+			'ocenzurowany' => $title . "\n\nTo jest ████████ słowo w teście.",
 		)));
 
 		$post = $this->board->post($id);
 		self::assertSame(ITEM_APPROVED, (int) $post['post_visibility']);
-		self::assertStringContainsString('████████', $post['post_text']);
-		self::assertStringNotContainsString('brzydkie', $post['post_text']);
+		self::assertSame($this->board->xml('To jest ████████ słowo w teście.'), $post['post_text'], 'the post\'s text, without the title');
+		self::assertSame($title, $this->board->title($id), 'the title stays as it was');
 		self::assertSame('', $post['bbcode_uid']);
 		$row = $this->board->row($id);
 		self::assertSame(pending_store::MASKED, $row['status']);
@@ -236,7 +301,8 @@ final class WebhookTest extends TestCase
 		$original = $this->board->post($id)['post_text'];
 		$this->board->db->pdo->exec('CREATE TRIGGER minos_test_text ' . $trigger);
 
-		self::assertSame(200, $this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ████████ słowo w teście.'))));
+		$masked = $this->board->title($id) . "\n\nTo jest ████████ słowo w teście.";
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked))));
 
 		$post = $this->board->post($id);
 		self::assertSame(ITEM_UNAPPROVED, (int) $post['post_visibility']);
@@ -245,7 +311,7 @@ final class WebhookTest extends TestCase
 		$row = $this->board->row($id);
 		self::assertSame(pending_store::HELD, $row['status']);
 		self::assertSame('mask_failed', $row['error_code']);
-		self::assertSame('To jest ████████ słowo w teście.', $row['masked_text'], 'kept for the moderator');
+		self::assertSame($masked, $row['masked_text'], 'kept for the moderator');
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_HELD'));
 		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_MASKED'));
 	}
@@ -275,6 +341,7 @@ final class WebhookTest extends TestCase
 		$posted = $this->board->posting('', 'post', array('xml' => $xml));
 		$id = $posted['post_id'];
 		self::assertSame($sent, $this->board->forum->plain_text($xml));
+		$masked = $this->board->title($id) . "\n\n" . $masked;
 
 		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked)));
 
@@ -294,12 +361,14 @@ final class WebhookTest extends TestCase
 		$this->board->configure(array(settings::CENSORED => settings::HOLD));
 		$id = $this->pending('To jest brzydkie słowo w teście.');
 
-		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => 'To jest ████████ słowo w teście.')));
+		$masked = $this->board->title($id) . "\n\nTo jest ████████ słowo w teście.";
+
+		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked)));
 
 		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
 		self::assertStringContainsString('brzydkie', $this->board->post($id)['post_text']);
 		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
-		self::assertSame('To jest ████████ słowo w teście.', $this->board->row($id)['masked_text']);
+		self::assertSame($masked, $this->board->row($id)['masked_text']);
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_HELD'));
 	}
 
@@ -379,12 +448,60 @@ final class WebhookTest extends TestCase
 
 	public function testAPostOfExactly3000CharactersIsAssessedWhole(): void
 	{
-		$id = $this->pending(str_repeat('ż', 3000));
+		// The title, the blank line and the text: 3000 characters together.
+		$id = $this->board->posting(str_repeat('ż', 3000 - mb_strlen("Temat\n\n")), 'post', array('title' => 'Temat'))['post_id'];
 
 		$this->board->deliver(self::verdict($id, 'bezpieczne'));
 
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 		self::assertSame('0', $this->board->row($id)['truncated']);
+	}
+
+	public function testATitleCountsWithinThe3000Characters(): void
+	{
+		$id = $this->board->posting(str_repeat('ż', 3000), 'post', array('title' => 'Temat'))['post_id'];
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne'));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the end of the text was not assessed');
+		self::assertSame('1', $this->board->row($id)['truncated']);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string,2:int,3:string}>
+	 */
+	public function masksAndTitles(): array
+	{
+		return array(
+			'a mask of the text only' => array("Temat rozmowy\n\nTo jest ████████ słowo.", 'To jest ████████ słowo.', ITEM_APPROVED, pending_store::MASKED),
+			'a mask in the title'     => array("Temat ███████\n\nTo jest brzydkie słowo.", 'To jest brzydkie słowo.', ITEM_UNAPPROVED, pending_store::HELD),
+			'a mask in both'          => array("Temat ███████\n\nTo jest ████████ słowo.", 'To jest brzydkie słowo.', ITEM_UNAPPROVED, pending_store::HELD),
+			'a mask of the blank line' => array("Temat rozmowy██To jest ████████ słowo.", 'To jest brzydkie słowo.', ITEM_UNAPPROVED, pending_store::HELD),
+		);
+	}
+
+	/**
+	 * @dataProvider masksAndTitles
+	 */
+	public function testAMaskThatTouchesTheTitleIsLeftToAModeratorAndTheTitleIsNeverChanged(string $masked, string $text, int $visibility, string $status): void
+	{
+		$this->board->configure(array(settings::CENSORED => settings::CENSORED_PUBLISH));
+		$id = $this->board->posting('To jest brzydkie słowo.', 'post', array('title' => 'Temat rozmowy'))['post_id'];
+
+		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked)));
+
+		self::assertSame(array($visibility, $status), array((int) $this->board->post($id)['post_visibility'], $this->board->row($id)['status']));
+		self::assertSame($this->board->xml($text), $this->board->post($id)['post_text']);
+		self::assertSame('Temat rozmowy', $this->board->title($id), 'the extension never changes a title');
+		self::assertSame('Temat rozmowy', $this->board->post($id)['post_subject']);
+		if ($status === pending_store::HELD)
+		{
+			self::assertSame('mask_manual', $this->board->row($id)['error_code']);
+			$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+			$this->board->listener->show_queue_details($details);
+			self::assertSame($masked, html_entity_decode(strip_tags($details['post_data']['MINOS_MASKED']), ENT_QUOTES, 'UTF-8'),
+				'the moderator sees the whole mask, title included');
+		}
 	}
 
 	public function testBlockedIsHeldByDefault(): void

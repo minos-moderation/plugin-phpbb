@@ -58,7 +58,7 @@ final class LanguageTest extends TestCase
 			$text = (string) file_get_contents($path);
 			// In PHP: what is passed to lang(), and the literals that are keys by their prefix
 			// (template variables are MINOS_* too, and are not language keys).
-			preg_match_all("/lang\\('([A-Z0-9_]+)'|'((?:ACP_MINOS|LOG_MINOS|MINOS_ERROR|MINOS_INSTALL|MINOS_REFUSAL|MINOS_MCP)_[A-Z0-9_]+)'/", $text, $php);
+			preg_match_all("/lang\\('([A-Z0-9_]+)'|'((?:ACP_MINOS|LOG_MINOS|MINOS_ERROR|MINOS_INSTALL|MINOS_REFUSAL|MINOS_MCP|MINOS_PROBLEM)_[A-Z0-9_]+)'/", $text, $php);
 			preg_match_all('/\{L_([A-Z0-9_]+)\}|lang\(\'([A-Z0-9_]+)\'\)/', $text, $template);
 			foreach (array_merge($php[1], $php[2], $template[1], $template[2]) as $key)
 			{
@@ -78,6 +78,10 @@ final class LanguageTest extends TestCase
 		foreach (array('BEZPIECZNE', 'OCENZUROWANE', 'ZABLOKOWANE', 'NIEOCENIONE', 'TIMEOUT', 'REFUSED') as $verdict)
 		{
 			$used['MINOS_MCP_VERDICT_' . $verdict] = 'event/listener.php';
+		}
+		foreach (array('LIMIT', 'OVERLOAD') as $pause)
+		{
+			$used['MINOS_PAUSE_' . $pause] = 'controller/acp.php';
 		}
 		foreach (array('PROFILE_FORUM_ADULT', 'PROFILE_FORUM_TEEN', 'FAIL_MODE_FAIL_OPEN', 'FAIL_MODE_FAIL_CLOSED',
 			'CENSORED_PUBLISH', 'CENSORED_HOLD', 'BLOCKED_HOLD', 'BLOCKED_DELETE') as $choice)

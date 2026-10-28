@@ -74,6 +74,34 @@ final class SweeperTest extends TestCase
 		self::assertSame(pending_store::VERDICT_TIMEOUT, $this->board->row($id)['verdict']);
 	}
 
+	public function testTheWaitForAVerdictCountsFromTheGatewaysAcceptance(): void
+	{
+		// Audit probe B P3, the other way round: a post the gateway accepts at minute 16 used to
+		// fall to the failure mode at minute 20, 4 of the gateway's 15 minutes later.
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));
+		$t0 = time();
+		$this->gateway->refuse(429, 'kolejka_pelna', 60);
+		$id = $this->board->posting('Post czekający na miejsce w kolejce.')['post_id'];
+		foreach (array(5, 10) as $minute)
+		{
+			$this->gateway->refuse(429, 'kolejka_pelna', 60);
+			$this->board->sweeper()->sweep($t0 + $minute * 60);
+		}
+		$this->board->sweeper()->sweep($t0 + 16 * 60);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'accepted at minute 16');
+
+		$this->board->sweeper()->sweep($t0 + 20 * 60 + 1);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'still waiting at minute 20');
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+
+		$this->board->sweeper()->sweep($t0 + (16 + 20) * 60 - 1);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'still waiting just before 16 + 20 minutes');
+
+		$this->board->sweeper()->sweep($t0 + (16 + 20) * 60 + 1);
+		self::assertSame(array(pending_store::PUBLISHED, pending_store::VERDICT_TIMEOUT), array($this->board->row($id)['status'], $this->board->row($id)['verdict']));
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
 	public function testAPostThatNeverGotThroughAlsoTimesOut(): void
 	{
 		$this->gateway->refuse(503, 'kolejka_niedostepna', 86400);

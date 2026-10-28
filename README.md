@@ -25,7 +25,8 @@ publikuje go z zamaskowanymi fragmentami albo zostawia w kolejce do zatwierdzeni
    operatorowi adres webhooka (patrz niżej) i włącz ocenianie.
 
 Po instalacji ocenianie jest wyłączone: rozszerzenie niczego nie wstrzymuje, dopóki go nie
-włączysz i nie podasz adresu bramy, klucza oraz sekretu.
+włączysz. Włączone bez poprawnego adresu bramy, klucza lub sekretu wstrzymuje nowe posty i od
+razu stosuje do nich tryb awarii, a każda strona panelu administracji mówi, czego brakuje.
 
 Paczka zawiera tylko to, co ładuje phpBB, oraz źródła dołączonej biblioteki
 `minos-moderation/client-php` (`vendor/minos-moderation/client-php/src/`). Nie zawiera
@@ -42,7 +43,7 @@ testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; w�
 | Sekret webhooka | — | Sekret podany raz, razem z kluczem. Strona pokazuje tylko jego początek; puste pole zachowuje zapisany sekret. Bez sekretu każde doręczenie jest odrzucane. |
 | Profil oceny | `forum_adult` | `forum_adult` (forum dla dorosłych) albo `forum_teen` (forum dla młodzieży, ocena surowsza). Profil musi być dozwolony dla klucza. |
 | Tryb awarii | **fail-closed** | Co zrobić z postem bez werdyktu — patrz „Tryb awarii”. |
-| Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
+| Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
 | Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
@@ -80,7 +81,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
-   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, a wysłany tekst jest
+   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł wysłany razem z
+   postem został nietknięty (rozszerzenie nigdy nie zmienia tytułu), a wysłany tekst jest
    dokładnie tym, co napisał autor (post bez formatowania BBCode, cytatów i atrybutów —
    inaczej publikacja zmieniłaby więcej niż zamaskowane słowa). W każdym innym wypadku post
    zostaje w kolejce z notatką „zamaskowany tekst wymaga ręcznego zastosowania”, a
@@ -101,14 +103,17 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.
-Jeśli autor poprawi post, który czeka na werdykt, post zostaje w kolejce i jest oceniany od
-nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
+Jeśli autor poprawi post, który czeka na werdykt (także sam tytuł tematu), post zostaje w
+kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 ## Tryb awarii
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
-werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji
-albo oceniła tylko początek długiego postu — decyduje tryb awarii:
+werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
+oceniła tylko początek długiego postu, post ma link albo tytuł, ale nie ma tekstu do oceny,
+albo
+ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
+tryb awarii:
 
 - **fail-closed** (domyślnie): post zostaje w kolejce do zatwierdzenia i czeka na
   moderatora; w panelu moderatora widać, dlaczego.
@@ -125,6 +130,10 @@ moderator nie zdążył go rozpatrzyć.
 
 Gdy brama jest przeciążona (`429`) lub chwilowo niedostępna (`503`, brak połączenia),
 rozszerzenie ponawia wysyłkę po czasie wskazanym przez bramę (albo po 1, 2, 4… minutach).
+Jeśli brama wskazuje czas późniejszy niż koniec oczekiwania na werdykt (np. po wyczerpaniu
+dziennego limitu klucza — do końca doby), post od razu obsługuje tryb awarii. Wyczerpany
+dzienny limit klucza i przeciążenie bramy widać na stronie ustawień jako komunikat z
+godziną, do której brama nie przyjmuje postów; znika po pierwszym przyjętym poście.
 Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, niedozwolony
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
@@ -138,7 +147,10 @@ Do bramy trafia wyłącznie:
 - tekst postu: **pierwsze 3000 znaków**, razem z cytatami — każdy poprzedzony wierszem
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
-  `title` i `alt` (tam też można ukryć słowa);
+  `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
+  tytułem tematu i pustym wierszem (tytuł mieści się w tych 3000 znakach); odpowiedź —
+  własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam tytuł, bez tekstu postu, nie
+  jest wysyłany: taki post obsługuje od razu tryb awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
@@ -158,10 +170,17 @@ przekierowaniem.
   pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
   wysyłany, bo werdykt niczego by nie zmienił;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- postów bez żadnego tekstu do oceny (sam cytat jest zwykłym postem: zostaje wstrzymany i
-  oceniony);
+- odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
+  załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z
+  linkiem albo z tytułem (każdy nowy temat, odpowiedź z własnym tematem), ale bez tekstu do
+  oceny — także z samym formatowaniem wokół spacji, np. `[b] [/b]`, albo z linkiem o pustym,
+  niewidocznym opisie — jest wstrzymywany i od razu obsługuje go tryb awarii, bez wysyłania
+  czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”. Sam tytuł
+  nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
-- wszystkich postów, gdy ocenianie jest wyłączone albo brakuje klucza, sekretu lub adresu.
+- wszystkich postów, gdy ocenianie jest wyłączone (gdy jest włączone, ale brakuje klucza,
+  sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
+  awarii).
 
 ## Wsparcie
 
@@ -184,13 +203,16 @@ Wyłączone ocenianie oznacza, że rozszerzenie nic nie robi: nowe posty publiku
 dawniej, nic nie jest wysyłane do bramy, webhook odpowiada `404` (brama ponawia doręczenie
 do końca swojego czasu), a zadanie cron nie działa — bez ponowień i bez trybu awarii. Posty,
 które czekały na werdykt, zostają w kolejce do zatwierdzenia i rozpatruje je moderator. Po
-ponownym włączeniu rozszerzenie wraca do czekających postów.
+ponownym włączeniu oceniania w ustawieniach posty, które wciąż czekały na werdykt, są
+wysyłane do oceny od nowa, z nowym czasem oczekiwania (nie trafiają od razu do trybu awarii).
 
-To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń.
+To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń. Po ponownym
+włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wraca do czekających
+postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
+wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
 ## Ograniczenia
 
-- Oceniana jest treść postu, nie tytuł tematu.
 - Poprawki postów już opublikowanych nie są oceniane ponownie.
 - Publikacja z maskowaniem zastępuje tekst postu zwykłym tekstem (bez formatowania), a
   indeks wyszukiwarki phpBB zachowuje słowa z oryginału.

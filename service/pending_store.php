@@ -19,8 +19,13 @@ namespace minos\moderation\service;
  * gateway's own `202`, and the cron task racing the webhook each change a row at most once.
  *
  * `revision` counts edits of a post while it waits: a verdict for an earlier revision never
- * applies to the edited text. `sent_md5` is the digest of the text last sent, so a verdict
- * is applied only to that text, however the post was changed meanwhile.
+ * applies to the edited text. `sent_md5` is the digest of the text last sent, stored before
+ * the request leaves, so a verdict is applied only to that text, however the post was changed
+ * meanwhile - also when the webhook overtakes the gateway's own `202` - and no verdict is
+ * recorded for a revision whose text was never sent.
+ *
+ * `submitted_at` is when the wait for a verdict began: the gateway's `202`, or for a row the
+ * gateway never accepted, its queueing (see {@see overdue}).
  */
 class pending_store
 {
@@ -153,7 +158,12 @@ class pending_store
 	}
 
 	/**
-	 * Rows still without a verdict that entered the queue at or before a moment.
+	 * Rows still without a verdict whose wait began at or before a moment.
+	 *
+	 * The wait begins when the gateway accepts the row (`202`, {@see mark_pending}): only then
+	 * does it assess the post and try to deliver the verdict for its 15 minutes. A row the
+	 * gateway never accepted (refused, busy, unreachable) waits from its queueing
+	 * ({@see create}, {@see restart}).
 	 *
 	 * @param int $cutoff Unix seconds.
 	 * @param int $limit  At most this many.
@@ -205,16 +215,30 @@ class pending_store
 	}
 
 	/**
-	 * The gateway accepted a queued row.
+	 * Stores the digest of the text about to be sent, before the request leaves: a verdict may
+	 * come back before the gateway's `202` is handled, and must find it.
 	 *
 	 * @param int    $post_id  The post.
-	 * @param int    $revision The revision that was sent.
-	 * @param string $sent_md5 The MD5 of the text that was sent.
+	 * @param int    $revision The revision being sent.
+	 * @param string $sent_md5 The MD5 of the text being sent.
+	 * @return bool False when the row is not queued under that revision (nothing to send).
+	 */
+	public function mark_sending($post_id, $revision, $sent_md5)
+	{
+		return $this->update(array('sent_md5' => (string) $sent_md5), $post_id, $revision, array(self::QUEUED), false);
+	}
+
+	/**
+	 * The gateway accepted a queued row: the wait for its verdict begins now.
+	 *
+	 * @param int $post_id  The post.
+	 * @param int $revision The revision that was sent.
+	 * @param int $now      Unix seconds: the moment of the `202`.
 	 * @return bool False when the row moved on meanwhile (its webhook may have come first).
 	 */
-	public function mark_pending($post_id, $revision, $sent_md5)
+	public function mark_pending($post_id, $revision, $now)
 	{
-		return $this->update(array('status' => self::PENDING, 'error_code' => '', 'sent_md5' => (string) $sent_md5),
+		return $this->update(array('status' => self::PENDING, 'error_code' => '', 'submitted_at' => (int) $now),
 			$post_id, $revision, array(self::QUEUED), true);
 	}
 
@@ -225,13 +249,11 @@ class pending_store
 	 * @param int    $revision   The revision that was sent.
 	 * @param int    $retry_at   Unix seconds.
 	 * @param string $error_code Why, for the ACP (never content).
-	 * @param string $sent_md5   The MD5 of the text that was sent (the gateway may have taken it
-	 *     although no answer came back).
 	 * @return bool
 	 */
-	public function mark_retry($post_id, $revision, $retry_at, $error_code, $sent_md5)
+	public function mark_retry($post_id, $revision, $retry_at, $error_code)
 	{
-		return $this->update(array('retry_at' => (int) $retry_at, 'error_code' => self::code($error_code), 'sent_md5' => (string) $sent_md5),
+		return $this->update(array('retry_at' => (int) $retry_at, 'error_code' => self::code($error_code)),
 			$post_id, $revision, array(self::QUEUED), true);
 	}
 
@@ -239,8 +261,13 @@ class pending_store
 	 * Records the outcome of an assessment, once.
 	 *
 	 * A row that timed out (published by the fail-open mode, or held by the fail-closed one)
-	 * still takes a verdict that arrives late, since the gateway may have accepted the post
-	 * later than it was queued here.
+	 * still takes a verdict that arrives late, since the gateway may have been slower than
+	 * the time-out.
+	 *
+	 * An outcome from the gateway is recorded only for a revision whose text was sent (its
+	 * digest is stored): any other is about no text this forum knows, is not applied, and the
+	 * row keeps waiting - for its time-out (the failure mode) or a new revision. The extension's
+	 * own outcomes ({@see VERDICT_TIMEOUT}, {@see VERDICT_REFUSED}) need no digest.
 	 *
 	 * @param int                $post_id    The post.
 	 * @param int                $revision   The revision the outcome is for.
@@ -269,7 +296,19 @@ class pending_store
 			'support'     => $support ? 1 : 0,
 			'masked_text' => is_string($masked) ? $masked : '',
 			'error_code'  => self::code($error_code),
-		), $post_id, $revision, self::OPEN, false, array(self::PUBLISHED, self::HELD));
+		), $post_id, $revision, self::OPEN, false, array(self::PUBLISHED, self::HELD), !self::is_own_outcome($verdict));
+	}
+
+	/**
+	 * Whether an outcome is the extension's own (no answer in time, a refused request) rather
+	 * than the gateway's: it is about no text, so it needs no digest of one.
+	 *
+	 * @param string $verdict The outcome.
+	 * @return bool
+	 */
+	public static function is_own_outcome($verdict)
+	{
+		return $verdict === self::VERDICT_TIMEOUT || $verdict === self::VERDICT_REFUSED;
 	}
 
 	/**
@@ -346,6 +385,37 @@ class pending_store
 	}
 
 	/**
+	 * Starts the assessment again for every row still waiting for a verdict (`queued`,
+	 * `pending`), when the extension is switched on again: while it was off nothing was sent,
+	 * and the webhook refused the gateway's deliveries. Each row becomes a new revision,
+	 * queued now, with a fresh time-out (the plugins' shared rule D9.13). A recorded verdict
+	 * (`received`) is left to be applied.
+	 *
+	 * @param int $now Unix seconds.
+	 * @return int Rows restarted.
+	 */
+	public function restart_waiting($now)
+	{
+		$this->db->sql_query('UPDATE ' . $this->table . '
+			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+				'status'       => self::QUEUED,
+				'verdict'      => '',
+				'categories'   => '',
+				'support'      => 0,
+				'attempts'     => 0,
+				'submitted_at' => (int) $now,
+				'retry_at'     => (int) $now,
+				'error_code'   => '',
+				'masked_text'  => '',
+				'sent_md5'     => '',
+				'approved_at'  => 0,
+				'approved_md5' => '',
+			)) . '
+			WHERE ' . $this->db->sql_in_set('status', self::OPEN));
+		return (int) $this->db->sql_affectedrows();
+	}
+
+	/**
 	 * Whether a row still belongs to the assessment: waiting, or timed out.
 	 *
 	 * @return string The condition.
@@ -391,9 +461,11 @@ class pending_store
 	 * @param array<int,string>   $from          Statuses the row must be in.
 	 * @param bool                $count_attempt Whether this was a submission attempt.
 	 * @param array<int,string>   $timed_out     Statuses a timed-out row may also be in.
+	 * @param bool                $sent          Whether the row's text must have been sent
+	 *     (a stored digest).
 	 * @return bool Whether the row changed.
 	 */
-	protected function update(array $values, $post_id, $revision, array $from, $count_attempt, array $timed_out = array())
+	protected function update(array $values, $post_id, $revision, array $from, $count_attempt, array $timed_out = array(), $sent = false)
 	{
 		$status = $this->db->sql_in_set('status', $from);
 		if ($timed_out)
@@ -404,7 +476,8 @@ class pending_store
 			SET ' . ($count_attempt ? 'attempts = attempts + 1, ' : '') . $this->db->sql_build_array('UPDATE', $values) . '
 			WHERE post_id = ' . (int) $post_id . '
 				AND revision = ' . (int) $revision . '
-				AND ' . $status;
+				AND ' . $status . ($sent ? "
+				AND sent_md5 <> ''" : '');
 		$this->db->sql_query($sql);
 		return $this->db->sql_affectedrows() === 1;
 	}
