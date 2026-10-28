@@ -29,6 +29,8 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 | `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
+| `bin/phpbb-checkout.sh` | phpBB 3.3.x at the one commit the stubs, the fixtures and the live board use. |
+| `tests/functional/`, `phpunit.functional.xml.dist` | The extension on a live phpBB board (see "The live board"); never shipped, never run by `vendor/bin/phpunit`. |
 | `.github/workflows/release.yml` | On a `v*` tag: builds the package, proves it with `.github/scripts/check-release-archive.sh` and attaches it to the GitHub Release. |
 
 ## The life of a post
@@ -241,7 +243,8 @@ composer install
 vendor/bin/phpunit
 ```
 
-No phpBB checkout is needed. `tests/stubs/` declares the phpBB and Symfony classes the
+No phpBB checkout is needed (the live board is a suite of its own: "The live board").
+`tests/stubs/` declares the phpBB and Symfony classes the
 extension names, with only the members it calls and phpBB 3.3's signatures;
 `content_visibility` and `notification\manager` are also fakes that record every call.
 `tests/Fake/Board.php` wires the real services as `config/services.yml` does over SQLite
@@ -259,9 +262,11 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board; `foreign_router.php` answers at the gateway's address as something else would (a 200 naming every item, a 408), which is retried until the mock's 202. |
+| `tests/functional` | Not in `vendor/bin/phpunit`: the extension's package on a live phpBB 3.3 board with phpBB's own harness and the mock gateway (see "The live board"). |
 | `tests/Repo` | The Claude Code rules, checked as properties of the agent files (a read-only agent lists its tools and none that writes - without the line it inherits all; a Sonnet agent that writes names every risk path in its "Risk list" block and none in its "You may change" block), each property broken once by an agent in `tests/Repo/fixtures/` that the check must reject; the language files; no PHP 8-only functions. |
 
-CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file and a package build.
+CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file, a package build and
+the functional suite on a live board (job `phpbb-functional`, on PHP 7.4 and 8.3).
 Every action the workflows use is pinned to a full commit SHA with its version in a comment
 (`uses: owner/action@<40-hex sha>  # v1.2.3`), the same SHA in `tests.yml` and `release.yml`;
 to refresh a pin, resolve the release's tag to its commit (`git ls-remote
@@ -269,17 +274,86 @@ https://github.com/<owner>/<action> refs/tags/<tag>`, the peeled `^{}` line for 
 tag), check that the commit belongs to that release, and change the SHA and the comment
 together everywhere the action is used.
 
+## The live board
+
+`tests/functional/moderation_test.php` runs the extension on a real phpBB 3.3 board, with
+phpBB's own functional test harness (`phpbb_functional_test_case`, `tests/` of phpBB's
+repository): the harness installs a board on MySQL, the board is served over HTTP, and the
+tests drive it as a browser would (Goutte), logging in, posting, using the ACP and the
+extension manager. The extension is installed from its own package (`bin/build-zip.sh`,
+unzipped into `phpBB/ext/`), the functional tests and `phpunit.functional.xml.dist` beside
+it; the mock gateway runs from the repository's `vendor/` (`MINOS_MOCK_PATH`), with an
+invented key and secret. Scenarios, in order on one board: enabling the extension (its
+table, every migration, starts switched off, the ACP page and the webhook URL); a post by a
+registered user (`f_noapprove` by phpBB's defaults) held, ONE item in the mock's queue, the
+mock's signed delivery through `app.php/minos/webhook` publishing it; a mask (the reader sees
+`██████`); `zablokowane` held, with the MCP queue's mark and details; the webhook while the
+board is disabled, the assessment switched off and the extension disabled; "Delete data"
+removing the table, every `config` and `config_text` value, the ACP modules and the
+migrations. The queue e-mail to moderators (audit R20, K-60) is checked in phpBB's own e-mail
+queue (`cache/<environment>/queue.php`; phpBB queues e-mails by default) for an administrator
+subscribed to it (`notification.type.needs_approval`): none while a post waits, none when it
+is published, exactly one when it is left to the moderators.
+
+How the harness comes up, from phpBB's checkout at `6c75df1` (`tests/RUNNING_TESTS.md`,
+`.github/setup-phpbb.sh`, `tests/test_framework/`): the tests run from the checkout's root
+(`tests/bootstrap.php` sets `$phpbb_root_path = 'phpBB/'`) with phpBB's own PHPUnit; the
+database and the board's URL come from the environment (`PHPBB_TEST_DBMS`, `..._DBHOST`,
+`..._DBPORT`, `..._DBNAME`, `..._DBUSER`, `..._DBPASSWD`, `PHPBB_FUNCTIONAL_URL`), the
+database must exist (the harness empties it and installs the board in-process through
+phpBB's installer, writing `phpBB/config.php`), and any web server serving `phpBB/` at that
+URL will do: phpBB's CI uses nginx and PHP-FPM; this job uses PHP's built-in server with four
+workers (`PHP_CLI_SERVER_WORKERS`), which also gives `app.php/minos/webhook` its path. On
+PHP 8 the harness needs phpBB's dependency swap (PHPUnit 9, `misantron/dbunit`), which
+`bin/phpbb-checkout.sh --tests` does as phpBB's CI does. Two quirks of the harness, not of
+real boards: it installs `server_protocol` and `force_server_vars` swapped (`'0'` and
+`'http://'`), which makes every absolute URL `//host/...` without its port, so the tests reset
+`force_server_vars` to a new board's `0`; and it leaves `cache/<environment>/queue.php` from an
+earlier run, which the tests remove.
+
+```bash
+bash bin/phpbb-checkout.sh /tmp/phpbb --tests
+composer install --no-dev
+unzip -q "$(bash bin/build-zip.sh | tail -n 1)" -d /tmp/phpbb/phpBB/ext/
+mkdir -p /tmp/phpbb/phpBB/ext/minos/moderation/tests
+cp -R tests/functional /tmp/phpbb/phpBB/ext/minos/moderation/tests/
+cp phpunit.functional.xml.dist /tmp/phpbb/phpBB/ext/minos/moderation/
+# a MySQL database phpbb_tests and a user for it; then, in /tmp/phpbb:
+PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t phpBB &
+PHPBB_TEST_DBMS='phpbb\db\driver\mysqli' PHPBB_TEST_DBHOST=127.0.0.1 PHPBB_TEST_DBPORT=3306 \
+PHPBB_TEST_DBNAME=phpbb_tests PHPBB_TEST_DBUSER=<user> PHPBB_TEST_DBPASSWD=<password> \
+PHPBB_FUNCTIONAL_URL=http://127.0.0.1:8080/ MINOS_MOCK_PATH=<this repository>/vendor/minos-moderation/client-php/mock-gateway \
+phpBB/vendor/bin/phpunit -c phpBB/ext/minos/moderation/phpunit.functional.xml.dist
+```
+
+What the live board showed (2026-10-28, phpBB 3.3.19 at `6c75df1`, PHP 8.3, MySQL 8.0):
+
+- **The webhook while the board is disabled** (ACP "Disable board", also a board over its
+  load limit): `app.php` answers `200` with phpBB's "board disabled" page before any route
+  runs (`user::setup()` -> `trigger_error()`), so the gateway takes the delivery as done and
+  does not retry; the verdict is lost, and the post waits for its time-out and the failure
+  mode. The README says so. (A bot gets `503`; the gateway is not a bot.)
+- **The webhook while the extension is disabled** in the extension manager: `404`, phpBB's
+  HTML page (the route does not exist); the gateway retries until its TTL. Switched off in the
+  extension's settings: `404` with an empty body, from the controller.
+- **phpBB requires an enabled extension's `vendor/autoload.php`** when there is one
+  (`di\container_builder`, the extensions' autoloaders). The package ships none (see
+  "Composer"); a clone with `composer install` (development packages) maps `phpbb\` onto
+  `tests/stubs/` and breaks the board (`500` on every page). Install from the package.
+- The queue e-mail to moderators (K-60), the MCP marks, the masked text as readers see it, the
+  ACP form, "Delete data" and switching on again (a new revision, D9.13): as described above.
+
 ## Text fixtures
 
 `tests/fixtures/phpbb-3.3/*.json` record, for invented posts only, what phpBB 3.3's real
 formatter stores (`xml`) and what its `clean_formatting()` and `unparse()` make of it, with
 the phpBB commit and version they came from. `tests/Text/RealFormatterFixtureTest.php` holds
 the `TextUtils` double and the extension's own text to them. To regenerate them (a session
-with network; the checkout stays outside the repository):
+with network; the checkout stays outside the repository; `bin/phpbb-checkout.sh` fetches the
+same commit the live board uses):
 
 ```bash
-git clone https://github.com/phpbb/phpbb.git /tmp/phpbb && git -C /tmp/phpbb checkout 6c75df1
-composer install --no-dev --working-dir=/tmp/phpbb/phpBB
+bash bin/phpbb-checkout.sh /tmp/phpbb
 php bin/phpbb-text-fixtures.php /tmp/phpbb tests/fixtures/phpbb-3.3
 ```
 
@@ -300,7 +374,9 @@ repository's README, "The mock gateway"). Verdicts come only from markers in the
 `[minos:zly-podpis]`, `[minos:stary-podpis]`, `[minos:cisza]`. Never send real users' posts
 to it: it keeps its queue as plain JSON on disk.
 
-Against a development phpBB:
+Against a development phpBB, with the extension installed there from its package
+(`bash bin/build-zip.sh`, unzipped into `ext/`; never a clone with `composer install`, see
+"Composer"):
 
 ```bash
 export MINOS_MOCK_WEBHOOK_URL=http://localhost:8080/app.php/minos/webhook   # your board
@@ -322,10 +398,12 @@ repository; `composer.lock` pins the commit: `e5df7d6d`, client-php's `main` wit
 lock moves only with a reviewed `composer update minos-moderation/client-php`, in a commit of
 its own. The extension never forks the client's verification.
 
-phpBB does not autoload an extension's `vendor/`, and requiring the bundled
-`vendor/autoload.php` would register a second Composer class loader next to phpBB's own, so
-`client_loader.php` maps `Minos\Client\` onto `vendor/minos-moderation/client-php/src/`
-itself. `bin/build-zip.sh` installs the client from `composer.lock` without development
+phpBB 3.3 requires an enabled extension's `vendor/autoload.php` when there is one
+(`di\container_builder`; seen on the live board). The package ships none: a second Composer
+class loader next to phpBB's own is avoided, and this repository's development autoloader
+would map `phpbb\` onto `tests/stubs/` (a clone with `composer install` on a board breaks
+it). So `client_loader.php` maps `Minos\Client\` onto
+`vendor/minos-moderation/client-php/src/` itself. `bin/build-zip.sh` installs the client from `composer.lock` without development
 packages; `bin/package.php` packs what phpBB loads and the client's `src/*.php` and
 `LICENSE` only - no `composer.lock`, no dependency manifest, no tests, no mock. The
 extension's own `composer.json` ships, reduced to its metadata, because phpBB's
@@ -434,10 +512,16 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `\phpbb\db\migration\data\v330\v330`, the cron task base (`is_runnable()`) and the
   `cron.task` tag, and `metadata_manager` (it requires `composer.json` and its fields).
 
-Not verified by running: the extension has not been installed on a live phpBB board. In
-particular, whether phpBB's renderer shows the parser's output for a masked text exactly as
-expected, the notification e-mails sent on an approval by the extension, the "in the queue"
-e-mail held back while a post is assessed and sent when it is left to a moderator, the MCP template
-event's look in prosilver, and the ACP page's look are known only from the source. The
+Verified by running on a live board since 2026-10-28 (the `phpbb-functional` job, "The live
+board"): enabling the extension and its migrations, the posting events holding a post, the
+webhook through `app.php` and `kernel.terminate`, a masked text as readers see it, the "in the
+queue" e-mail held back while a post is assessed and sent once when it is left to a
+moderator, the MCP queue's mark and details (prosilver), the ACP form, "Delete data"
+(`revert_schema` and the reverted `config.add`, `config_text.add`, `module.add`).
+
+Still not verified by running: the notification e-mails to watchers when the extension
+publishes a post (no watcher in the scenarios), the cron task on a live board (the tests call
+nothing through `cron.php`), MySQL's MyISAM (the job runs InnoDB, MySQL 8.0's default; audit
+N1), other databases than MySQL, and the look of the ACP and MCP pages beyond their text. The
 area51 documentation was not reachable from the development environment; phpBB's source
 was.

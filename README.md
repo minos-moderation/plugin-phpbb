@@ -139,7 +139,8 @@ pojedynczy komunikat nie musi oznaczać błędu ustawień.
    powiadomienie znika z listy, a e-mail nie wychodzi wcale. Gdy zostawi post w kolejce dla
    moderatora (werdykt, tryb awarii fail-closed, brak tekstu do oceny, post zmieniony w
    czasie oceny), moderatorzy dostają to powiadomienie jeszcze raz, tym razem także e-mailem
-   (jeśli mają je włączone) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
+   (jeśli mają je włączone; phpBB domyślnie powiadamia o postach czekających na zatwierdzenie
+   tylko na forum, e-mail moderator włącza w ustawieniach powiadomień w panelu użytkownika) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
    spóźniony werdykt, poprawka), powiadomienie zostaje na liście, a drugi e-mail nie wychodzi. O postach, których rozszerzenie nie wstrzymuje,
    phpBB powiadamia jak zwykle. Jeśli wyłączysz ocenianie w ustawieniach, gdy posty czekają
    na werdykt, moderatorzy dostają wtedy e-mail o każdym z nich (od tej chwili decydują o
@@ -319,6 +320,16 @@ włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wrac
 postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
+**Wyłączenie forum** (w panelu administracji „Wyłącz forum”, a także forum wyłączone przez
+phpBB po przekroczeniu limitu obciążenia) działa inaczej: phpBB na każde żądanie — także na
+doręczenie werdyktu pod adres webhooka — odpowiada stroną „forum wyłączone” z kodem `200`,
+zanim rozszerzenie je zobaczy. Brama uznaje wtedy werdykt za doręczony i go nie ponawia:
+werdykt przepada, a post czeka do końca czasu oczekiwania i obsługuje go tryb awarii
+(fail-closed: zostaje w kolejce dla moderatora). Tak odpowiada prawdziwe forum phpBB 3.3 w
+teście (zadanie `phpbb-functional` w CI). Na czas prac przy forum lepiej wyłączyć ocenianie w
+ustawieniach rozszerzenia: webhook odpowiada wtedy `404`, brama ponawia doręczenie, a po
+ponownym włączeniu oceniania czekające posty są oceniane od nowa.
+
 ## Usunięcie rozszerzenia
 
 Wyłączenie rozszerzenia w menedżerze rozszerzeń (**Wyłącz**) zostawia jego dane: patrz
@@ -327,8 +338,8 @@ tabelę (`minos_pending` — z zapisanymi werdyktami i oryginałami zamaskowanyc
 ustawienia (także klucz i sekret webhooka) i stronę w panelu administracji. Posty, które
 czekały w kolejce, zostają w kolejce phpBB dla moderatorów; posty opublikowane z maskowaniem
 zostają zamaskowane, a ich oryginałów nie da się już odzyskać z rozszerzenia. Wpisy w
-dzienniku moderatorów zostają. Na żywym forum phpBB nie zostało to jeszcze sprawdzone
-testem (opis wynika z migracji rozszerzenia i z kodu phpBB 3.3).
+dzienniku moderatorów zostają. Sprawdza to test na żywym forum phpBB 3.3 (zadanie
+`phpbb-functional` w CI, opis w `docs/development.md`, „The live board”).
 
 ## Ograniczenia
 
