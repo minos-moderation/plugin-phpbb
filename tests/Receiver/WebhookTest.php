@@ -432,7 +432,7 @@ final class WebhookTest extends TestCase
 		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
 		$this->board->listener->show_queue_details($details);
 
-		self::assertStringContainsString('oceniono 3000 pierwszych znaków', $queue['post_row']['POST_SUBJECT']);
+		self::assertStringContainsString($this->board->language->lang('MINOS_MCP_TRUNCATED'), $queue['post_row']['POST_SUBJECT'], 'the note on the queue row');
 		self::assertTrue($details['post_data']['S_MINOS_TRUNCATED']);
 	}
 

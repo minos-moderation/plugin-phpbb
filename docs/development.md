@@ -60,7 +60,14 @@ arrives late. A fail-open publication is marked on the row (`approved_at`, `appr
 a late verdict applies to the published post only while phpBB still shows the extension's
 own approval (`post_delete_user = ANONYMOUS` and `post_delete_time = approved_at`: phpBB
 records who changed a post's visibility and when) and the text it approved (the MD5). Any
-other change - a moderator's deletion, restoration or approval, an edit - supersedes it.
+other change - a moderator's deletion, restoration or approval, an edit made other than
+through phpBB's posting form - supersedes it. An edit through the posting form, by the author
+or a moderator, of a post that timed out (published by fail-open or held by fail-closed) is
+reassessed instead: the post goes back to the queue (`ITEM_REAPPROVE` when it was published)
+as a new revision, `phpbb:<id>.<n>` (`event/listener.php`, `pending_store::is_reopenable`).
+An edit of a post published on a verdict, or published unassessed after `nieocenione` or a
+refusal, is not reassessed (the shared rule D9.2 is deferred until the gateway's capacity
+decision).
 "Back to the queue" is phpBB's `ITEM_REAPPROVE`, which the MCP queue lists.
 
 ## Decisions worth knowing
