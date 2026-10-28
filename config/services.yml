@@ -30,6 +30,7 @@ services:
             - '%tables.users%'
             - '%tables.groups%'
             - '%tables.user_group%'
+            - '%tables.poll_options%'
 
     minos.moderation.transport:
         class: minos\moderation\service\curl_transport

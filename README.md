@@ -83,8 +83,9 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
-   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł wysłany razem z
-   postem został nietknięty (rozszerzenie nigdy nie zmienia tytułu), a wysłany tekst jest
+   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł i ankieta
+   wysłane razem z postem zostały nietknięte (rozszerzenie nigdy nie zmienia tytułu ani
+   ankiety), a wysłany tekst jest
    dokładnie tym, co napisał autor (post bez formatowania BBCode, cytatów i atrybutów —
    inaczej publikacja zmieniłaby więcej niż zamaskowane słowa). W każdym innym wypadku post
    zostaje w kolejce z notatką „zamaskowany tekst wymaga ręcznego zastosowania”, a
@@ -111,7 +112,7 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.
-Jeśli autor poprawi post, który czeka na werdykt (także sam tytuł tematu), post zostaje w
+Jeśli autor poprawi post, który czeka na werdykt (także sam tytuł tematu albo ankietę), post zostaje w
 kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 ## Tryb awarii
@@ -161,9 +162,11 @@ Do bramy trafia wyłącznie:
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
   `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
-  tytułem tematu i pustym wierszem (tytuł mieści się w tych 3000 znakach); odpowiedź —
-  własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam tytuł, bez tekstu postu, nie
-  jest wysyłany: taki post obsługuje od razu tryb awarii (patrz niżej);
+  tytułem tematu i pustym wierszem, a jeśli temat ma ankietę — także jej pytaniem i
+  opcjami (każda w osobnym wierszu) i pustym wierszem (tytuł i ankieta mieszczą się w tych
+  3000 znakach); odpowiedź — własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam
+  tytuł, bez tekstu postu ani ankiety, nie jest wysyłany: taki post obsługuje od razu tryb
+  awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).

@@ -607,6 +607,63 @@ final class SubmitterTest extends TestCase
 		self::assertSame($sent, $this->gateway->items(0)[0]['tekst']);
 	}
 
+	public function testATopicsPollIsSentWithItsQuestionAndOptions(): void
+	{
+		// Shared rule D9.1: a poll's question and options are part of the text of the post
+		// that carries the poll; a word in an option must not pass unassessed.
+		$this->board->posting('Treść pierwszego postu.', 'post', array('title' => 'Temat z ankietą',
+			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Opcja pierwsza', 'Obraźliwa opcja druga'))));
+
+		self::assertSame("Temat z ankietą\n\nCo wybierasz?\nOpcja pierwsza\nObraźliwa opcja druga\n\nTreść pierwszego postu.",
+			$this->gateway->items(0)[0]['tekst']);
+	}
+
+	public function testAPollChangedWhileThePostWaitsIsSentAsANewRevision(): void
+	{
+		$id = $this->board->posting('Treść pierwszego postu.', 'post', array('title' => 'Temat z ankietą',
+			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Tak', 'Nie'))))['post_id'];
+
+		// The author edits the first post: same text, a changed poll.
+		$this->board->edit($id, 'Treść pierwszego postu.', null, array('question' => 'Co wybierasz?', 'options' => array('Tak', 'Nie', 'Zmieniona opcja')));
+
+		self::assertCount(2, $this->gateway->requests);
+		$item = $this->gateway->items(1)[0];
+		self::assertSame('phpbb:' . $id . '.1', $item['id']);
+		self::assertStringContainsString("Zmieniona opcja", $item['tekst']);
+		self::assertSame(md5($item['tekst']), $this->board->row($id)['sent_md5'], 'the digest covers the poll');
+	}
+
+	public function testAPollIsTextToAssessEvenOverABlankPost(): void
+	{
+		$this->board->posting('', 'post', array('title' => 'Temat z ankietą', 'xml' => '<r><B><s>[b]</s> <e>[/b]</e></B></r>',
+			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Tak', 'Nie'))));
+
+		self::assertSame("Temat z ankietą\n\nCo wybierasz?\nTak\nNie", $this->gateway->items(0)[0]['tekst'], 'the poll is sent, the title with it');
+	}
+
+	public function testAReplyInATopicWithAPollCarriesNoPoll(): void
+	{
+		$first = $this->board->posting('Treść pierwszego postu.', 'post', array('title' => 'Temat z ankietą',
+			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Tak', 'Nie'))))['post_id'];
+
+		$this->board->posting('Odpowiedź w temacie.', 'reply', array('topic_id' => (int) $this->board->post($first)['topic_id']));
+
+		self::assertSame('Odpowiedź w temacie.', $this->gateway->items(1)[0]['tekst']);
+	}
+
+	public function testAPollChangedWhileThePostWaitsIsNoLongerTheTextAVerdictIsFor(): void
+	{
+		$id = $this->board->posting('Treść pierwszego postu.', 'post', array('title' => 'Temat z ankietą',
+			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Tak', 'Nie'))))['post_id'];
+		// Changed outside the edit flow (not through the posting form).
+		$this->board->store_poll((int) $this->board->post($id)['topic_id'], 'Co wybierasz?', array('Tak', 'Nie', 'Dopisana opcja'));
+
+		$this->board->deliver(array('id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne'));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'never published for a poll the gateway did not see');
+		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
+	}
+
 	public function testARetryReadsTheTitleFromTheTopic(): void
 	{
 		$this->gateway->refuse(503, 'kolejka_niedostepna');

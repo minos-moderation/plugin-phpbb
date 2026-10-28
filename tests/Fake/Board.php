@@ -150,7 +150,7 @@ class Board
 		$board->language = new \phpbb\language\language(__DIR__ . '/../../language/pl');
 		$board->forum = new forum($board->db, $board->visibility, $board->notifications, new TextUtils(), $board->parser,
 			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users',
-			self::PREFIX . 'groups', self::PREFIX . 'user_group');
+			self::PREFIX . 'groups', self::PREFIX . 'user_group', self::PREFIX . 'poll_options');
 		$board->transport = $transport ?: new RecordingTransport();
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
@@ -218,7 +218,8 @@ class Board
 	 * @param string $mode    `post`, `reply` or `quote`.
 	 * @param array  $options forum_id, poster_id (also the current user), topic_id (for a reply), xml (a stored text),
 	 *     data (phpBB's post data as other extensions left it), title (of a new topic) or
-	 *     subject (of a reply), both as phpBB stores them (HTML-escaped).
+	 *     subject (of a reply), both as phpBB stores them (HTML-escaped), poll (of a new topic:
+	 *     its question and options, as typed).
 	 * @return array{post_id:int,visibility:int,data:array} The post and what phpBB stored.
 	 */
 	public function posting($text, $mode = 'post', array $options = array())
@@ -261,6 +262,10 @@ class Board
 			$visibility = $this->auth->acl_get('f_noapprove', $forum_id) ? ITEM_APPROVED : ITEM_UNAPPROVED;
 		}
 		$post_id = $this->write_post($xml, $visibility, $options + array('forum_id' => $forum_id));
+		if (isset($options['poll']))
+		{
+			$this->store_poll((int) $this->post($post_id)['topic_id'], $options['poll']['question'], $options['poll']['options']);
+		}
 
 		$data['post_id'] = $post_id;
 		// What submit_post() then sends for a post in the queue, with the post data the
@@ -285,9 +290,11 @@ class Board
 	 * @param string      $text    Its new plain text.
 	 * @param string|null $title   Its new subject (as stored); for a topic's first post also
 	 *     the topic's title, as phpBB changes both.
+	 * @param array{question:string,options:array<int,string>}|null $poll The topic's poll, changed
+	 *     with its first post.
 	 * @return void
 	 */
-	public function edit($post_id, $text, $title = null)
+	public function edit($post_id, $text, $title = null, ?array $poll = null)
 	{
 		$post = $this->post($post_id);
 		$before = new \phpbb\event\data(array(
@@ -308,6 +315,10 @@ class Board
 		{
 			$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET topic_title = '" . $this->db->sql_escape($title) . "'
 				WHERE topic_first_post_id = " . (int) $post_id);
+		}
+		if ($poll !== null)
+		{
+			$this->store_poll((int) $post['topic_id'], $poll['question'], $poll['options']);
 		}
 		// submit_post() for an edit that puts a published post back into the queue.
 		if ($visibility === ITEM_REAPPROVE && (int) $post['post_visibility'] !== ITEM_REAPPROVE)
@@ -369,6 +380,30 @@ class Board
 		$row = $this->db->sql_fetchrow($result);
 		$this->db->sql_freeresult($result);
 		return $row;
+	}
+
+	/**
+	 * Stores a topic's poll as submit_post() does: the question in the topic, each option in
+	 * its own row, both parsed as a post is.
+	 *
+	 * @param int               $topic_id
+	 * @param string            $question
+	 * @param array<int,string> $options
+	 * @return void
+	 */
+	public function store_poll($topic_id, $question, array $options)
+	{
+		$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET poll_title = '" . $this->db->sql_escape($this->xml($question)) . "'
+			WHERE topic_id = " . (int) $topic_id);
+		$this->db->sql_query('DELETE FROM ' . self::PREFIX . 'poll_options WHERE topic_id = ' . (int) $topic_id);
+		foreach (array_values($options) as $index => $option)
+		{
+			$this->db->sql_query('INSERT INTO ' . self::PREFIX . 'poll_options ' . $this->db->sql_build_array('INSERT', array(
+				'poll_option_id'   => $index + 1,
+				'topic_id'         => (int) $topic_id,
+				'poll_option_text' => $this->xml($option),
+			)));
+		}
 	}
 
 	/**
@@ -511,7 +546,10 @@ class Board
 		$this->db->pdo->exec("CREATE TABLE {$prefix}topics (topic_id INTEGER PRIMARY KEY, forum_id INTEGER NOT NULL DEFAULT 0,
 			topic_title TEXT NOT NULL DEFAULT '', topic_first_post_id INTEGER NOT NULL DEFAULT 0, topic_last_post_id INTEGER NOT NULL DEFAULT 0,
 			topic_time INTEGER NOT NULL DEFAULT 0, topic_last_post_time INTEGER NOT NULL DEFAULT 0,
-			topic_posts_approved INTEGER NOT NULL DEFAULT 0, topic_visibility INTEGER NOT NULL DEFAULT 0)");
+			topic_posts_approved INTEGER NOT NULL DEFAULT 0, topic_visibility INTEGER NOT NULL DEFAULT 0,
+			poll_title TEXT NOT NULL DEFAULT '')");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}poll_options (poll_option_id INTEGER NOT NULL DEFAULT 0,
+			topic_id INTEGER NOT NULL DEFAULT 0, poll_option_text TEXT NOT NULL DEFAULT '', poll_option_total INTEGER NOT NULL DEFAULT 0)");
 		$this->db->pdo->exec("CREATE TABLE {$prefix}posts (post_id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER NOT NULL DEFAULT 0,
 			forum_id INTEGER NOT NULL DEFAULT 0, poster_id INTEGER NOT NULL DEFAULT 0, poster_ip TEXT NOT NULL DEFAULT '',
 			post_time INTEGER NOT NULL DEFAULT 0, post_visibility INTEGER NOT NULL DEFAULT 0, post_subject TEXT NOT NULL DEFAULT '',

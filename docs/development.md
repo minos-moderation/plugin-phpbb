@@ -113,6 +113,15 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   while the post waits is a new revision (an edit) or a verdict that no longer applies. A
   masked text that touches the title (or the blank line) holds the post: the extension never
   changes a title (`forum::masked_body`).
+- **A poll is assessed with the post that carries it** (shared rule D9.1: a poll's question
+  and options are part of the text of the post that carries the poll). In phpBB the poll is
+  the topic's and is created and edited with its first post: that post's text sent is the
+  title, a blank line, the question and each option on a line of its own, a blank line and
+  the post's text (`forum::poll_of`, read on every attempt, so `sent_md5` covers it). A poll
+  changed with the first post while it waits is an edit, hence a new revision; a poll
+  changed otherwise makes a verdict for the old one stand aside (superseded). A mask that
+  touches the poll holds the post, as one in the title does; with a poll, a post whose own
+  text is blank is still sent (the poll is text to assess).
 - **The text sent is read from phpBB's stored XML** (`forum::plain_text`), not with phpBB's
   `clean_formatting()`, which puts a space where every tag sat: `zak[b]a[/b]zane` would reach
   the gateway as "zak a zane" (recorded in `tests/fixtures/phpbb-3.3/`). Inline formatting adds
@@ -202,7 +211,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | Suite | What it proves |
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
@@ -332,6 +341,12 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `mcp_queue::approve_posts()` as the model for the approval and its notifications
   (`notification_manager::add_notifications()` / `delete_notifications()`); the MCP queue
   listing ITEM_UNAPPROVED and ITEM_REAPPROVE posts;
+- polls: `submit_post()` stores a poll of the first post in `TOPICS_TABLE.poll_title` and
+  `POLL_OPTIONS_TABLE` (`poll_option_id` in order, `poll_option_text`), both parsed as a post
+  is (`message_parser::parse_poll()`, rendered by `viewtopic.php` with
+  `generate_text_for_display()`), before `core.submit_post_end`; the poll comes only with the
+  first post's form (`$poll` of `core.posting_modify_submit_post_before`, modes `post` and
+  `edit`);
 - `textformatter\utils_interface::unparse()` (the mask check); `clean_formatting()` is in the
   stub but not used for the text sent (see "Text fixtures"); the XML `s9e\TextFormatter`
   stores (`<r>`/`<t>`, `<s>`/`<e>` markup, `QUOTE author`, `LIST`/`LI`, `CODE`, `<br/>`), run

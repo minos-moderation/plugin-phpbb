@@ -108,6 +108,9 @@ class forum
 	/** @var string */
 	protected $user_group_table;
 
+	/** @var string */
+	protected $poll_options_table;
+
 	/**
 	 * @param \phpbb\db\driver\driver_interface     $db            The database.
 	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
@@ -122,6 +125,7 @@ class forum
 	 * @param string                                $users_table
 	 * @param string                                $groups_table
 	 * @param string                                $user_group_table
+	 * @param string                                $poll_options_table
 	 */
 	public function __construct(
 		\phpbb\db\driver\driver_interface $db,
@@ -136,7 +140,8 @@ class forum
 		$forums_table,
 		$users_table,
 		$groups_table,
-		$user_group_table
+		$user_group_table,
+		$poll_options_table
 	)
 	{
 		$this->db = $db;
@@ -152,6 +157,7 @@ class forum
 		$this->users_table = $users_table;
 		$this->groups_table = $groups_table;
 		$this->user_group_table = $user_group_table;
+		$this->poll_options_table = $poll_options_table;
 	}
 
 	/**
@@ -298,9 +304,38 @@ class forum
 	}
 
 	/**
-	 * The whole text the gateway reads for a post: its title ({@see title_of}), a blank line
-	 * and the post's plain text ({@see plain_text}). A title alone is never sent: without
-	 * text to assess in the post itself, the result is ''. The text is NOT shortened here.
+	 * The poll a post carries, as a reader sees it: its question, then each option on a line of
+	 * its own (the plugins' shared rule D9.1: a poll's question and options are part of the text
+	 * of the post that carries the poll). In phpBB the poll belongs to the topic and is edited
+	 * with its first post, which carries it; the question and the options are stored as parsed
+	 * text, as a post is.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string The poll, or '' for none.
+	 */
+	public function poll_of(array $post)
+	{
+		if ((int) $post['post_id'] !== (int) $post['topic_first_post_id'] || !isset($post['poll_title']) || (string) $post['poll_title'] === '')
+		{
+			return '';
+		}
+		$lines = array($this->plain_text((string) $post['poll_title']));
+		$result = $this->db->sql_query('SELECT poll_option_text FROM ' . $this->poll_options_table . '
+			WHERE topic_id = ' . (int) $post['topic_id'] . '
+			ORDER BY poll_option_id');
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$lines[] = $this->plain_text((string) $row['poll_option_text']);
+		}
+		$this->db->sql_freeresult($result);
+		return trim(implode("\n", array_filter($lines, 'strlen')));
+	}
+
+	/**
+	 * The whole text the gateway reads for a post: its title ({@see title_of}), the poll it
+	 * carries ({@see poll_of}) and the post's plain text ({@see plain_text}), a blank line
+	 * between each two. A title alone is never sent: without text to assess in the post itself
+	 * or its poll, the result is ''. The text is NOT shortened here.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
 	 * @return string
@@ -308,12 +343,12 @@ class forum
 	public function text_of(array $post)
 	{
 		$text = $this->plain_text((string) $post['post_text']);
-		if ($text === '')
+		$poll = $this->poll_of($post);
+		if ($text === '' && $poll === '')
 		{
 			return '';
 		}
-		$title = $this->title_of($post);
-		return ($title !== '') ? $title . self::TITLE_SEPARATOR . $text : $text;
+		return implode(self::TITLE_SEPARATOR, array_filter(array($this->title_of($post), $poll, $text), 'strlen'));
 	}
 
 	/**
@@ -349,8 +384,8 @@ class forum
 	 *
 	 * Only when (a) it is the text sent ({@see text_of}, whole) with some characters replaced
 	 * by `█` - the same length in characters, every other character unchanged; (b) the title
-	 * sent with it is untouched: the extension never changes a title, so a mask in the title
-	 * is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
+	 * and the poll sent with it are untouched: the extension never changes a title or a poll,
+	 * so a mask in them is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
 	 * BBCode, quote or attribute text was transformed on the way out, so publishing the masked
 	 * text changes nothing but the masked characters. Anything else is for a moderator to
 	 * apply by hand.
@@ -375,7 +410,7 @@ class forum
 		{
 			return null;
 		}
-		// Everything before the post's own text: the title and the blank line.
+		// Everything before the post's own text: the title, the poll and the blank lines.
 		$title_chars = count($sent_chars) - mb_strlen($body, 'UTF-8');
 		foreach ($masked_chars as $i => $char)
 		{
@@ -487,7 +522,7 @@ class forum
 	public function load_post($post_id)
 	{
 		$sql = 'SELECT p.*, t.topic_title, t.topic_first_post_id, t.topic_last_post_id, t.topic_time,
-				t.topic_last_post_time, t.topic_posts_approved, f.forum_name, u.username, u.user_posts
+				t.topic_last_post_time, t.topic_posts_approved, t.poll_title, f.forum_name, u.username, u.user_posts
 			FROM ' . $this->posts_table . ' p
 			INNER JOIN ' . $this->topics_table . ' t ON t.topic_id = p.topic_id
 			LEFT JOIN ' . $this->forums_table . ' f ON f.forum_id = p.forum_id

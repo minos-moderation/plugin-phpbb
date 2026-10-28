@@ -17,8 +17,9 @@ use minos\moderation\platform\forum;
  *
  * What leaves the forum is exactly: an id (`phpbb:<post id>`, with `.<revision>` after an
  * edit), the post's plain text - for the first post of a topic preceded by the topic's title
- * and a blank line, for a reply by its own subject when the author changed phpBB's default
- * "Re: ..." - (its first 3000 characters, title included), the profile, and the spam signals
+ * and a blank line (and by the topic's poll, its question and options, and a blank line), for
+ * a reply by its own subject when the author changed phpBB's default "Re: ..." - (its first
+ * 3000 characters, title and poll included), the profile, and the spam signals
  * (`links`, `link_domains`, `author_first_post`). Never an e-mail, an IP address or a user
  * id.
  *
