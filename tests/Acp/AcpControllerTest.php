@@ -3,6 +3,7 @@
 namespace minos\moderation\tests\Acp;
 
 use minos\moderation\controller\acp;
+use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\tests\Fake\Board;
 use minos\moderation\tests\Fake\FormRequest;
@@ -247,6 +248,49 @@ final class AcpControllerTest extends TestCase
 		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
 		self::assertSame($this->board->language->lang('MINOS_PAUSE_OVERLOAD', gmdate('H:i', $this->board->settings->pause(time())['until'])),
 			$this->template->vars['MINOS_PAUSE']);
+	}
+
+	public function testSwitchedOnWithoutAKeyThePageSaysWhatIsMissing(): void
+	{
+		$this->board->configure(array(), array(settings::API_KEY => ''));
+
+		$this->show(new FormRequest());
+
+		self::assertFalse($this->template->vars['S_MINOS_READY']);
+		self::assertTrue($this->template->vars['S_MINOS_ENABLED']);
+		self::assertStringContainsString($this->board->language->lang('MINOS_PROBLEM_API_KEY'), $this->template->vars['MINOS_NOT_READY']);
+		self::assertStringNotContainsString($this->board->language->lang('MINOS_PROBLEM_WEBHOOK_SECRET'), $this->template->vars['MINOS_NOT_READY']);
+		self::assertStringNotContainsString(Board::SECRET, $this->template->everything());
+	}
+
+	public function testSwitchingOnAgainSendsWhatWaitedWithAFreshTimeout(): void
+	{
+		// Shared rule D9.13: a post that waited while the extension was off used to get the
+		// failure mode in the first run after it was switched on again.
+		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
+		$this->submit($this->form(array('minos_enabled' => '0')));
+		self::assertFalse($this->board->settings->enabled());
+		// An hour passes; the gateway gives up on the delivery the webhook refused.
+		$this->board->db->sql_query('UPDATE phpbb_minos_pending SET submitted_at = submitted_at - 3600 WHERE post_id = ' . $id);
+
+		$this->submit($this->form(array('minos_enabled' => '1')));
+
+		$row = $this->board->row($id);
+		self::assertSame(array('1', pending_store::QUEUED), array($row['revision'], $row['status']));
+		self::assertEqualsWithDelta(time(), (int) $row['submitted_at'], 2, 'a fresh time-out');
+		$this->board->sweeper()->sweep(time());
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'sent again, not timed out');
+		self::assertSame('phpbb:' . $id . '.1', $this->board->transport->items(1)[0]['id']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testSavingWhileSwitchedOnRestartsNothing(): void
+	{
+		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
+
+		$this->submit($this->form(array('minos_enabled' => '1')));
+
+		self::assertSame(array('0', pending_store::PENDING), array($this->board->row($id)['revision'], $this->board->row($id)['status']));
 	}
 
 	/**

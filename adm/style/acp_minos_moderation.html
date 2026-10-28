@@ -18,8 +18,10 @@
 
 <!-- IF S_MINOS_READY -->
 <div class="successbox"><p>{L_MINOS_ACP_READY}</p></div>
+<!-- ELSEIF S_MINOS_ENABLED -->
+<div class="errorbox"><p>{MINOS_NOT_READY}</p></div>
 <!-- ELSE -->
-<div class="errorbox"><p>{L_MINOS_ACP_NOT_READY}</p></div>
+<div class="errorbox"><p>{L_MINOS_ACP_OFF}</p></div>
 <!-- ENDIF -->
 
 <!-- IF S_MINOS_PAUSE -->

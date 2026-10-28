@@ -232,16 +232,38 @@ class settings
 
 	/**
 	 * Whether the extension can submit posts: switched on, with a gateway, a key and a secret.
-	 * Until then it holds nothing, so a half-configured forum works as before.
+	 * Switched on without them, it holds new posts and gives them the failure mode at once
+	 * (the plugins' shared rule D9.12), and every ACP page says why ({@see problems}).
 	 *
 	 * @return bool
 	 */
 	public function is_ready()
 	{
-		return $this->enabled()
-			&& $this->gateway_url() !== ''
-			&& self::valid_key($this->api_key())
-			&& self::valid_secret($this->webhook_secret());
+		return $this->enabled() && !$this->problems();
+	}
+
+	/**
+	 * What keeps the extension from submitting posts, whether it is switched on or not.
+	 *
+	 * @return array<int,string> Language keys; empty when the gateway, the key and the secret
+	 *     are usable.
+	 */
+	public function problems()
+	{
+		$problems = array();
+		if ($this->gateway_url() === '')
+		{
+			$problems[] = 'MINOS_PROBLEM_GATEWAY_URL';
+		}
+		if (!self::valid_key($this->api_key()))
+		{
+			$problems[] = 'MINOS_PROBLEM_API_KEY';
+		}
+		if (!self::valid_secret($this->webhook_secret()))
+		{
+			$problems[] = 'MINOS_PROBLEM_WEBHOOK_SECRET';
+		}
+		return $problems;
 	}
 
 	/**

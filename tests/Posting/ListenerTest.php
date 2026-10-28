@@ -78,6 +78,15 @@ final class ListenerTest extends TestCase
 			'the extension switched off' => array(static function (Board $board) {
 				$board->configure(array(settings::ENABLED => 0));
 			}),
+		);
+	}
+
+	/**
+	 * @return array<string,array{0:callable}>
+	 */
+	public function unusableConfigurations(): array
+	{
+		return array(
 			'no key' => array(static function (Board $board) {
 				$board->configure(array(), array(settings::API_KEY => ''));
 			}),
@@ -88,6 +97,44 @@ final class ListenerTest extends TestCase
 				$board->configure(array(settings::GATEWAY_URL => 'http://gateway.example'));
 			}),
 		);
+	}
+
+	/**
+	 * @dataProvider unusableConfigurations
+	 */
+	public function testSwitchedOnWithoutAUsableConfigurationANewPostGetsTheFailureModeAtOnce(callable $arrange): void
+	{
+		// Shared rule D9.12: such a post used to be published as if the extension were off.
+		$arrange($this->board);
+
+		$posted = $this->board->posting('Zwykły testowy wpis.');
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($posted['post_id'])['post_visibility'], 'the default fail-closed');
+		$row = $this->board->row($posted['post_id']);
+		self::assertSame(array(pending_store::HELD, pending_store::VERDICT_REFUSED, 'not_configured'), array($row['status'], $row['verdict'], $row['error_code']));
+		self::assertSame(array(), $this->gateway->requests);
+	}
+
+	public function testSwitchedOnWithoutAKeyFailOpenPublishesUnassessed(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN), array(settings::API_KEY => ''));
+
+		$posted = $this->board->posting('Zwykły testowy wpis.');
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($posted['post_id'])['post_visibility']);
+		self::assertGreaterThan(0, (int) $this->board->row($posted['post_id'])['approved_at'], 'marked as a fail-open publication');
+		self::assertSame(array(), $this->gateway->requests);
+	}
+
+	public function testAnEditOfAWaitingPostWithoutAUsableConfigurationGetsTheFailureModeAtOnce(): void
+	{
+		$id = $this->board->posting('Pierwsza wersja wpisu.')['post_id'];
+		$this->board->configure(array(), array(settings::WEBHOOK_SECRET => ''));
+
+		$this->board->edit($id, 'Druga wersja wpisu.');
+
+		self::assertSame(array('1', pending_store::HELD, 'not_configured'), array($this->board->row($id)['revision'], $this->board->row($id)['status'], $this->board->row($id)['error_code']));
+		self::assertCount(1, $this->gateway->requests, 'only the first version was sent');
 	}
 
 	/**

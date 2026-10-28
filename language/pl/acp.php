@@ -21,12 +21,13 @@ if (empty($lang) || !is_array($lang))
 $lang = array_merge($lang, array(
 	'MINOS_ACP_EXPLAIN'          => 'Minos wysyła nowe posty do bramy Wergiliusz, która ocenia ich treść i odsyła werdykt na adres webhooka tego forum. Na czas oceny post czeka w kolejce do zatwierdzenia. Do bramy trafia wyłącznie tekst postu, przy nowym temacie poprzedzony tytułem (razem pierwsze 3000 znaków, z cytatami i ich autorami, bez formatowania, z tekstem atrybutów title i alt), liczba linków, do 10 domen, na które prowadzą, i informacja, czy to pierwszy post autora. Nigdy nie są wysyłane dane konta autora (e-mail, adres IP, identyfikator, login); jedyne imiona i nazwy, które trafiają do bramy, to te wpisane w treść postu, np. autorzy cytatów, bo brama ocenia je jako część tekstu.',
 	'MINOS_ACP_SAVED'            => 'Ustawienia zostały zapisane.',
-	'MINOS_ACP_NOT_READY'        => 'Rozszerzenie nie wstrzymuje teraz żadnych postów: włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
+	'MINOS_ACP_NOT_READY'        => 'Ocenianie jest włączone, ale rozszerzenie nie może wysyłać postów do oceny (%s). Do czasu uzupełnienia ustawień każdy nowy post od razu obsługuje tryb awarii (fail-closed: czeka na moderatora; fail-open: jest publikowany bez oceny).',
+	'MINOS_ACP_OFF'              => 'Ocenianie jest wyłączone: rozszerzenie nic nie robi, a nowe posty publikują się jak dawniej. Włącz je i podaj adres bramy, klucz API oraz sekret webhooka.',
 	'MINOS_ACP_READY'            => 'Rozszerzenie działa: nowe posty są oceniane przed publikacją.',
 
 	'MINOS_SETTINGS'             => 'Ustawienia',
 	'MINOS_ENABLED'              => 'Oceniaj nowe posty',
-	'MINOS_ENABLED_EXPLAIN'      => 'Wyłączone rozszerzenie nic nie robi: nowe posty publikują się jak dawniej, nic nie jest wysyłane do bramy, a werdykty są odrzucane (webhook odpowiada 404). Posty, które czekały na werdykt, zostają w kolejce do decyzji moderatora.',
+	'MINOS_ENABLED_EXPLAIN'      => 'Wyłączone rozszerzenie nic nie robi: nowe posty publikują się jak dawniej, nic nie jest wysyłane do bramy, a werdykty są odrzucane (webhook odpowiada 404). Posty, które czekały na werdykt, zostają w kolejce do decyzji moderatora; po ponownym włączeniu są wysyłane do oceny od nowa, z nowym czasem oczekiwania.',
 	'MINOS_GATEWAY_URL'          => 'Adres bramy',
 	'MINOS_GATEWAY_URL_EXPLAIN'  => 'Zwykle https://gateway.wergiliusz.app. Tylko https:// (http:// wyłącznie dla localhost, do testów z atrapą bramy).',
 	'MINOS_API_KEY'              => 'Klucz API',

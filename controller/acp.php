@@ -112,10 +112,16 @@ class acp
 			}
 			else
 			{
+				$was_enabled = $this->settings->enabled();
 				$errors = $this->settings->save($this->read_form());
 				if (!$errors)
 				{
 					$saved = true;
+					if (!$was_enabled && $this->settings->enabled())
+					{
+						// Switched on again: what waited is sent again, with a fresh time-out.
+						$this->store->restart_waiting(time());
+					}
 					$this->log->add('admin', $this->user->data['user_id'], $this->user->ip, 'LOG_MINOS_SETTINGS_UPDATED');
 				}
 			}
@@ -138,6 +144,7 @@ class acp
 			'ERROR_MSG'             => self::escape(implode('<br>', $messages), true),
 			'S_MINOS_READY'         => $this->settings->is_ready(),
 			'S_MINOS_ENABLED'       => $this->settings->enabled(),
+			'MINOS_NOT_READY'       => self::escape($this->language->lang('MINOS_ACP_NOT_READY', $this->problems_text())),
 			'MINOS_GATEWAY_URL'     => self::escape($this->shown_url()),
 			'MINOS_KEY_HINT'        => self::escape($this->settings->key_hint()),
 			'MINOS_SECRET_HINT'     => self::escape($this->settings->secret_hint()),
@@ -183,6 +190,21 @@ class acp
 				'TIME'       => $this->user->format_date((int) $row['submitted_at']),
 			));
 		}
+	}
+
+	/**
+	 * What keeps the extension from submitting posts, in the administrator's words.
+	 *
+	 * @return string
+	 */
+	protected function problems_text()
+	{
+		$problems = array();
+		foreach ($this->settings->problems() as $key)
+		{
+			$problems[] = $this->language->lang($key);
+		}
+		return implode(', ', $problems);
 	}
 
 	/**

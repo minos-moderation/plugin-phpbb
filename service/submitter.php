@@ -68,6 +68,7 @@ class submitter
 	const ERROR_ANSWER = 'bad_answer';
 	const ERROR_REDIRECT = 'redirect';
 	const ERROR_EMPTY = 'empty_text';
+	const ERROR_NOT_CONFIGURED = 'not_configured';
 
 	/** @var settings */
 	protected $settings;
@@ -129,7 +130,8 @@ class submitter
 	}
 
 	/**
-	 * Sends queued rows, in batches the gateway accepts.
+	 * Sends queued rows, in batches the gateway accepts - or, while the extension cannot
+	 * submit ({@see settings::is_ready}), gives them the failure mode at once.
 	 *
 	 * @param array<int,array<string,mixed>> $rows Queued rows.
 	 * @param int                            $now  Unix seconds.
@@ -137,6 +139,21 @@ class submitter
 	 */
 	public function submit(array $rows, $now)
 	{
+		if (!$this->settings->is_ready())
+		{
+			// Switched on without a key, a secret or a usable gateway address: no verdict can
+			// come, so the failure mode applies at once (the plugins' shared rule D9.12).
+			foreach ($rows as $row)
+			{
+				if ($row['status'] === pending_store::QUEUED)
+				{
+					$this->guarded((int) $row['post_id'], function () use ($row, $now) {
+						return $this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_NOT_CONFIGURED, $now);
+					});
+				}
+			}
+			return;
+		}
 		$batch = array();
 		foreach ($rows as $row)
 		{

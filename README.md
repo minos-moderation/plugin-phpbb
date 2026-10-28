@@ -25,7 +25,8 @@ publikuje go z zamaskowanymi fragmentami albo zostawia w kolejce do zatwierdzeni
    operatorowi adres webhooka (patrz niżej) i włącz ocenianie.
 
 Po instalacji ocenianie jest wyłączone: rozszerzenie niczego nie wstrzymuje, dopóki go nie
-włączysz i nie podasz adresu bramy, klucza oraz sekretu.
+włączysz. Włączone bez poprawnego adresu bramy, klucza lub sekretu wstrzymuje nowe posty i od
+razu stosuje do nich tryb awarii, a każda strona panelu administracji mówi, czego brakuje.
 
 Paczka zawiera tylko to, co ładuje phpBB, oraz źródła dołączonej biblioteki
 `minos-moderation/client-php` (`vendor/minos-moderation/client-php/src/`). Nie zawiera
@@ -109,8 +110,9 @@ kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zas
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
 werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
-oceniła tylko początek długiego postu albo post ma link, ale nie ma tekstu do oceny —
-decyduje tryb awarii:
+oceniła tylko początek długiego postu, post ma link, ale nie ma tekstu do oceny, albo
+ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
+tryb awarii:
 
 - **fail-closed** (domyślnie): post zostaje w kolejce do zatwierdzenia i czeka na
   moderatora; w panelu moderatora widać, dlaczego.
@@ -173,7 +175,9 @@ przekierowaniem.
   bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do
   oceny”. Sam tytuł tematu nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
-- wszystkich postów, gdy ocenianie jest wyłączone albo brakuje klucza, sekretu lub adresu.
+- wszystkich postów, gdy ocenianie jest wyłączone (gdy jest włączone, ale brakuje klucza,
+  sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
+  awarii).
 
 ## Wsparcie
 
@@ -196,9 +200,13 @@ Wyłączone ocenianie oznacza, że rozszerzenie nic nie robi: nowe posty publiku
 dawniej, nic nie jest wysyłane do bramy, webhook odpowiada `404` (brama ponawia doręczenie
 do końca swojego czasu), a zadanie cron nie działa — bez ponowień i bez trybu awarii. Posty,
 które czekały na werdykt, zostają w kolejce do zatwierdzenia i rozpatruje je moderator. Po
-ponownym włączeniu rozszerzenie wraca do czekających postów.
+ponownym włączeniu oceniania w ustawieniach posty, które wciąż czekały na werdykt, są
+wysyłane do oceny od nowa, z nowym czasem oczekiwania (nie trafiają od razu do trybu awarii).
 
-To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń.
+To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń. Po ponownym
+włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wraca do czekających
+postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
+wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
 ## Ograniczenia
 

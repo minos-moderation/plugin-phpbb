@@ -28,11 +28,13 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
  * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
  * posts with neither text to assess nor a link (attachments only); and everything while the
- * extension is off or not configured. A post with a link but no text to assess is held and
- * goes to the failure mode at once, without a request (the plugins' shared rule D9.5): a
- * link, even one with a blank text, never passes unassessed, and a title is never sent
- * alone. Switched off, the extension does nothing at all: an edit of a post it held is not
- * sent either, and the post waits for a moderator.
+ * extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
+ * address), it holds new posts and gives them the failure mode at once (the plugins' shared
+ * rule D9.12). A post with a link but no text to assess is held and goes to the failure
+ * mode at once, without a request (the plugins' shared rule D9.5): a link, even one with a
+ * blank text, never passes unassessed, and a title is never sent alone. Switched off, the
+ * extension does nothing at all: an edit of a post it held is not sent either, and the post
+ * waits for a moderator.
  *
  * MCP: the approval queue marks the posts the extension holds, and a post's details show
  * the outcome, including the gateway's call for support (`wsparcie`).
@@ -158,11 +160,11 @@ class listener implements EventSubscriberInterface
 
 		$now = time();
 		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now) : $this->store->create($post_id, $now);
-		if (!$queued || !$this->settings->is_ready())
+		if (!$queued)
 		{
-			// Not ready: the row waits, and the cron task applies the failure mode in time.
 			return;
 		}
+		// Sent at once; without a usable configuration, the failure mode at once instead.
 		$this->submitter->submit(array($this->store->find($post_id)), $now);
 	}
 
@@ -236,7 +238,7 @@ class listener implements EventSubscriberInterface
 	 */
 	protected function should_hold(array $data, $forum_id)
 	{
-		if (!$this->settings->is_ready() || !$this->settings->applies_to_forum($forum_id))
+		if (!$this->settings->enabled() || !$this->settings->applies_to_forum($forum_id))
 		{
 			return false;
 		}

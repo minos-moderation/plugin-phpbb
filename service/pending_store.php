@@ -385,6 +385,37 @@ class pending_store
 	}
 
 	/**
+	 * Starts the assessment again for every row still waiting for a verdict (`queued`,
+	 * `pending`), when the extension is switched on again: while it was off nothing was sent,
+	 * and the webhook refused the gateway's deliveries. Each row becomes a new revision,
+	 * queued now, with a fresh time-out (the plugins' shared rule D9.13). A recorded verdict
+	 * (`received`) is left to be applied.
+	 *
+	 * @param int $now Unix seconds.
+	 * @return int Rows restarted.
+	 */
+	public function restart_waiting($now)
+	{
+		$this->db->sql_query('UPDATE ' . $this->table . '
+			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+				'status'       => self::QUEUED,
+				'verdict'      => '',
+				'categories'   => '',
+				'support'      => 0,
+				'attempts'     => 0,
+				'submitted_at' => (int) $now,
+				'retry_at'     => (int) $now,
+				'error_code'   => '',
+				'masked_text'  => '',
+				'sent_md5'     => '',
+				'approved_at'  => 0,
+				'approved_md5' => '',
+			)) . '
+			WHERE ' . $this->db->sql_in_set('status', self::OPEN));
+		return (int) $this->db->sql_affectedrows();
+	}
+
+	/**
 	 * Whether a row still belongs to the assessment: waiting, or timed out.
 	 *
 	 * @return string The condition.

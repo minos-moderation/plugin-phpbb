@@ -13,6 +13,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `ext.php` | Refuses to be enabled without phpBB 3.3, PHP 7.4, cURL or the bundled client. |
 | `client_loader.php` | Loads `Minos\Client` from the bundled `vendor/` (see "Composer"). |
 | `config/services.yml`, `config/routing.yml` | The services; the `POST /minos/webhook` route. |
+| `event/acp_notice.php`, `adm/style/event/` | Every ACP page: what is missing while the extension is switched on without a usable configuration. |
 | `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. |
 | `service/submitter.php`, `service/curl_transport.php` | `POST /api/v1/b2b/oceny` and every class of answer. |
 | `controller/webhook.php`, `service/receiver.php` | The receiving checklist: raw body, signature, payload, record. |
@@ -68,6 +69,17 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   waits for a human. An unrecognised stored value reads as fail-closed too.
 - **Switched off, the extension does nothing**: the webhook answers `404` before reading
   anything, nothing is sent, the cron task is not runnable. Held posts wait for moderators.
+  Switched on again in the ACP, every row still waiting (`queued`, `pending`) becomes a new
+  revision, queued with a fresh time-out (`pending_store::restart_waiting`; the plugins'
+  shared rule D9.13). Re-enabled in the extension manager with the setting left on, the cron
+  task resumes where it stopped (overdue rows get the failure mode).
+- **Switched on without a usable configuration, the failure mode** (shared rule D9.12): with
+  no key, no secret or no usable gateway address, new posts are held as usual and get the
+  failure mode at once (`refused`, `not_configured`), without a request; every ACP page says
+  what is missing (`event/acp_notice.php` on `core.adm_page_header`, rendered by
+  `adm/style/event/acp_overall_header_body_before.html`), never a stored value. A fresh
+  installation starts switched off. Finished rows - the original of a masked post, the
+  verdict - are kept 30 days (D9.11), pruned by the cron task.
 - **A link without text to assess is the failure mode** (the plugins' shared rule D9.5): a
   post whose text is empty but which holds a link (`<URL>`, also with a blank text a reader
   cannot see) is held and gets the failure mode at once, without a request; the MCP notes
@@ -146,7 +158,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
-| `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body). |
+| `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
@@ -250,6 +262,9 @@ a `release` environment with a required reviewer on the `publish` job.
 Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75df1`
 (2026-09-28), which is what the stubs copy:
 
+- `core.adm_page_header` (triggered first in `adm_page_header()`, `includes/functions_acp.php`)
+  and the ACP template event `acp_overall_header_body_before` (`adm/style/overall_header.html`,
+  first thing in `<body>`), checked on 3.3.x at `6c75df1`;
 - events `core.posting_modify_submit_post_before` (`data`, `mode`, `post_id`, `forum_id`),
   `core.submit_post_end` (`data` with `post_id`, `post_visibility`, `mode`),
   `core.mcp_queue_get_posts_modify_post_row`, `core.mcp_queue_approve_details_template`,

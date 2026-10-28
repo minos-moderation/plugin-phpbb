@@ -73,6 +73,15 @@ services:
         tags:
             - { name: event.listener }
 
+    minos.moderation.acp_notice:
+        class: minos\moderation\event\acp_notice
+        arguments:
+            - '@minos.moderation.settings'
+            - '@template'
+            - '@language'
+        tags:
+            - { name: event.listener }
+
     minos.moderation.controller.webhook:
         class: minos\moderation\controller\webhook
         arguments:
