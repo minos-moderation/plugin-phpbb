@@ -21,6 +21,9 @@ use minos\moderation\platform\forum;
  * signals (`links`, `link_domains`, `author_first_post`). Never an e-mail, an IP address or
  * a user id.
  *
+ * Before the request leaves, each row stores the digest of its text (`sent_md5`). The wait
+ * for a verdict - the time-out - is counted from the gateway's `202`.
+ *
  * - `202` whose `przyjete` names every item: the rows wait for their webhooks;
  * - `429`, `503`, another `5xx`, no answer at all, or an answer that is not the gateway's:
  *   the rows are retried after `blad.ponow_za_s`, or after a backoff doubling from 60 s;
@@ -174,6 +177,11 @@ class submitter
 			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
 			return null;
 		}
+		// The digest goes in before the request: a verdict may overtake the gateway's 202.
+		if (!$this->store->mark_sending((int) $row['post_id'], (int) $row['revision'], md5($text)))
+		{
+			return null;
+		}
 		return array(
 			'row'  => $row,
 			'md5'  => md5($text),
@@ -244,8 +252,8 @@ class submitter
 			{
 				foreach ($batch as $entry)
 				{
-					$this->guarded((int) $entry['row']['post_id'], function () use ($entry) {
-						return $this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $entry['md5']);
+					$this->guarded((int) $entry['row']['post_id'], function () use ($entry, $now) {
+						return $this->store->mark_pending((int) $entry['row']['post_id'], (int) $entry['row']['revision'], $now);
 					});
 				}
 				return;
@@ -330,8 +338,8 @@ class submitter
 			{
 				$pause = min(self::MAX_BACKOFF_S, self::FIRST_BACKOFF_S * (2 ** min(10, (int) $row['attempts'])));
 			}
-			$this->guarded((int) $row['post_id'], function () use ($row, $now, $pause, $code, $entry) {
-				return $this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code, $entry['md5']);
+			$this->guarded((int) $row['post_id'], function () use ($row, $now, $pause, $code) {
+				return $this->store->mark_retry((int) $row['post_id'], (int) $row['revision'], $now + $pause, $code);
 			});
 		}
 	}

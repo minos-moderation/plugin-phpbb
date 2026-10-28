@@ -189,6 +189,69 @@ final class WebhookTest extends TestCase
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 	}
 
+	public function testAVerdictThatOvertakesTheGatewaysAcceptanceStillChecksTheTextSent(): void
+	{
+		// Audit probe 3 A, the other way round: the webhook arrives before the extension handles
+		// its own 202, after the text changed on a path the extension does not see.
+		$gateway = new class() extends \minos\moderation\tests\Fake\RecordingTransport {
+			/** @var callable|null */
+			public $before_answer;
+
+			public function post($url, array $headers, $body, $timeout_s)
+			{
+				$answer = parent::post($url, $headers, $body, $timeout_s);
+				if ($this->before_answer !== null)
+				{
+					call_user_func($this->before_answer, json_decode($body, true)['elementy'][0]['id']);
+				}
+				return $answer;
+			}
+		};
+		$board = Board::open(':memory:', $gateway);
+		$gateway->before_answer = static function (string $id) use ($board) {
+			$board->db->sql_query("UPDATE phpbb_posts SET post_text = '<t>Treść podmieniona, której brama nie widziała.</t>' WHERE post_id = " . (int) substr($id, 6));
+			$board->deliver(array('id' => $id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne'));
+		};
+
+		$id = $board->posting('Pierwsza, oceniana treść.')['post_id'];
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($id)['post_visibility'], 'the changed text is not published');
+		self::assertSame(pending_store::SUPERSEDED, $board->row($id)['status']);
+	}
+
+	public function testAVerdictForARevisionWhoseTextWasNeverSentIsNotApplied(): void
+	{
+		$id = $this->pending();
+		// A row without the digest of a text sent (as no row of this version can be).
+		$this->board->db->sql_query("UPDATE phpbb_minos_pending SET sent_md5 = '' WHERE post_id = " . $id);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne')));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(array(pending_store::PENDING, ''), array($this->board->row($id)['status'], $this->board->row($id)['verdict']),
+			'nothing is recorded: the row keeps waiting for its time-out');
+		$this->board->sweeper()->sweep(time() + 20 * 60 + 1);
+		self::assertSame(array(pending_store::HELD, pending_store::VERDICT_TIMEOUT), array($this->board->row($id)['status'], $this->board->row($id)['verdict']),
+			'the failure mode, the default fail-closed');
+	}
+
+	public function testARecordedVerdictWithoutTheDigestOfTheTextSentIsNotApplied(): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));
+		$id = $this->pending();
+		$body = json_encode(self::verdict($id, 'bezpieczne'));
+		$controller = new webhook(new Request(array('X-Wergiliusz-Podpis' => Signature::sign(Board::SECRET, $body, time())), $body),
+			$this->board->receiver, $this->board->deferred, $this->board->dispatcher);
+		self::assertSame(200, $controller->handle()->getStatusCode());
+		self::assertSame(pending_store::RECEIVED, $this->board->row($id)['status'], 'recorded, not applied yet');
+		$this->board->db->sql_query("UPDATE phpbb_minos_pending SET sent_md5 = '' WHERE post_id = " . $id);
+
+		$this->board->dispatcher->terminate();
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'an outcome about no known text publishes nothing');
+		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
+	}
+
 	public function testCensoredWithPublishReplacesTheTextAndKeepsTheOriginal(): void
 	{
 		$id = $this->pending('To jest brzydkie słowo w teście.');

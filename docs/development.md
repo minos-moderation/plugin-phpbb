@@ -37,6 +37,14 @@ A row of `minos_pending` moves `queued` â†’ `pending` (the gateway said `202`) â
 `UPDATE` checked by its affected-row count, so a repeated delivery, a webhook that
 overtakes its own `202`, and the cron task racing the webhook change a row once.
 
+The time-out counts from the gateway's `202` (`mark_pending` moves `submitted_at` to it),
+so the gateway always has its whole delivery window; a row the gateway never accepted counts
+from its queueing. The digest of the text (`sent_md5`) is stored when the request is
+prepared, before it leaves (`mark_sending`): a webhook that overtakes its own `202` is still
+checked against the text sent. A row without a digest takes no verdict from the gateway
+(nothing is recorded; it waits for its time-out or a new revision), and an outcome recorded
+without one is applied to nothing.
+
 `revision` counts edits while a post waits. The id sent is `phpbb:<post id>` for the first
 revision and `phpbb:<post id>.<revision>` after an edit; a verdict for another revision is
 answered `200` and dropped.

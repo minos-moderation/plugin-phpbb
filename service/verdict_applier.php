@@ -183,10 +183,14 @@ class verdict_applier
 			$post = $this->forum->load_post($post_id);
 			$sent = (string) $row['sent_md5'];
 			$text = ($post !== null) ? $this->forum->text_of($post) : '';
+			// The gateway's outcome is about the text sent, and only that text: without its digest
+			// it is about no known text. The extension's own outcomes (no answer, a refusal) are
+			// about no text; a digest they have is still checked.
+			$about_text = ($sent !== '' || !pending_store::is_own_outcome((string) $row['verdict']));
 			if ($post === null
 				|| ($late && !$this->forum->untouched_since_approval($post, $approved_at, (string) $row['approved_md5']))
 				|| (!$late && !$this->forum->awaits_approval($post))
-				|| ($sent !== '' && !hash_equals($sent, md5(forum::first_chars($text)))))
+				|| ($about_text && !hash_equals($sent, md5(forum::first_chars($text)))))
 			{
 				// Gone, dealt with by someone else, or no longer the text that was sent: the
 				// outcome is not about this post as it is, and that decision stands.
