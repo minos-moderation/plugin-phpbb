@@ -11,6 +11,7 @@
         <testsuite name="extension">
             <directory>tests/Receiver</directory>
             <directory>tests/Submission</directory>
+            <directory>tests/Text</directory>
             <directory>tests/Posting</directory>
             <directory>tests/Cron</directory>
             <directory>tests/Acp</directory>

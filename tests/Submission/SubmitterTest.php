@@ -117,7 +117,7 @@ final class SubmitterTest extends TestCase
 			'only a quote, no author' => array('<r><QUOTE><s>[quote]</s>OBELGA<e>[/quote]</e></QUOTE></r>', 'OBELGA'),
 			'nested quotes' => array(
 				'<r><QUOTE author="Ala"><s>[quote=Ala]</s><QUOTE author="Ola"><s>[quote=Ola]</s>środek<e>[/quote]</e></QUOTE>zewnątrz<e>[/quote]</e></QUOTE>ja</r>',
-				"Ala napisał(a):\n\nOla napisał(a):\nśrodek\nzewnątrz\nja",
+				"Ala napisał(a):\nOla napisał(a):\nśrodek\nzewnątrz\nja",
 			),
 		);
 	}

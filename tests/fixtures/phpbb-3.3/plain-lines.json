@@ -1,0 +1,9 @@
+{
+    "phpbb_commit": "6c75df15811d706e60694df86ccd487c98159656",
+    "phpbb_version": "3.3.19",
+    "generator": "bin/phpbb-text-fixtures.php",
+    "bbcode": "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\"",
+    "xml": "<t>Pierwsza linia<br/>\nDruga linia<br/>\n<br/>\nCzwarta &amp; &lt;znaki&gt; \"cudzysłów\"</t>",
+    "clean_formatting": "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\"",
+    "unparse": "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""
+}

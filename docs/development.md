@@ -27,6 +27,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `migrations/` | The table; the settings and the ACP module. |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
+| `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
 | `.github/workflows/release.yml` | On a `v*` tag: builds the package, proves it with `.github/scripts/check-release-archive.sh` and attaches it to the GitHub Release. |
 
 ## The life of a post
@@ -78,6 +79,13 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   while the post waits is a new revision (an edit) or a verdict that no longer applies. A
   masked text that touches the title (or the blank line) holds the post: the extension never
   changes a title (`forum::masked_body`).
+- **The text sent is read from phpBB's stored XML** (`forum::plain_text`), not with phpBB's
+  `clean_formatting()`, which puts a space where every tag sat: `zak[b]a[/b]zane` would reach
+  the gateway as "zak a zane" (recorded in `tests/fixtures/phpbb-3.3/`). Inline formatting adds
+  nothing between words; `QUOTE`, `LIST`, `LI`, `CODE`, `br` and `p` start and end a line (one
+  line break, or the author's own); `<s>`/`<e>` (the typed markup) are dropped. A stored text
+  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing. The XML
+  parser is PHP's DOM, which phpBB 3.3 itself requires (its text formatter does).
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
@@ -121,6 +129,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held; edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id. |
@@ -129,6 +138,27 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |
 
 CI runs everything on PHP 7.4 and 8.3, plus `php -l` over every file and a package build.
+
+## Text fixtures
+
+`tests/fixtures/phpbb-3.3/*.json` record, for invented posts only, what phpBB 3.3's real
+formatter stores (`xml`) and what its `clean_formatting()` and `unparse()` make of it, with
+the phpBB commit and version they came from. `tests/Text/RealFormatterFixtureTest.php` holds
+the `TextUtils` double and the extension's own text to them. To regenerate them (a session
+with network; the checkout stays outside the repository):
+
+```bash
+git clone https://github.com/phpbb/phpbb.git /tmp/phpbb && git -C /tmp/phpbb checkout 6c75df1
+composer install --no-dev --working-dir=/tmp/phpbb/phpBB
+php bin/phpbb-text-fixtures.php /tmp/phpbb tests/fixtures/phpbb-3.3
+```
+
+The generator builds phpBB's s9e factory, parser and utils as phpBB's own unit tests do
+(`set_s9e_services()` with the default BBCodes and the smilies and style of
+`tests/text_formatter/s9e/fixtures/default_formatting.xml`), parses each text with BBCode,
+smilies and links on, and writes one file per text. A new text goes into its `$corpus`.
+The current fixtures come from commit `6c75df15811d706e60694df86ccd487c98159656` (phpBB
+3.3.19, 2026-09-28).
 
 ## The mock gateway
 
@@ -219,7 +249,10 @@ Checked on 2026-09-30 against phpBB's own source, branch `3.3.x` at commit `6c75
   `mcp_queue::approve_posts()` as the model for the approval and its notifications
   (`notification_manager::add_notifications()` / `delete_notifications()`); the MCP queue
   listing ITEM_UNAPPROVED and ITEM_REAPPROVE posts;
-- `textformatter\utils_interface::clean_formatting()`, `unparse()`;
+- `textformatter\utils_interface::unparse()` (the mask check); `clean_formatting()` is in the
+  stub but not used for the text sent (see "Text fixtures"); the XML `s9e\TextFormatter`
+  stores (`<r>`/`<t>`, `<s>`/`<e>` markup, `QUOTE author`, `LIST`/`LI`, `CODE`, `<br/>`), run
+  through the real formatter for the fixtures;
   `parser_interface::parse()`, `disable_bbcodes()`, `disable_smilies()`,
   `disable_magic_url()` and their `enable_*`; `message_parser` feeding the parser raw text;
 - `log_interface::add()` with the `mod` and `critical` modes; `language::lang()` returning a

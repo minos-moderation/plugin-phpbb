@@ -32,6 +32,15 @@ class forum
 	/** What introduces a quote's author in the text sent (content, in Polish). */
 	const QUOTE_AUTHOR_SUFFIX = ' napisał(a):';
 
+	/** Elements of phpBB's stored XML that hold the markup as typed (`[b]`, `[/b]`), not text. */
+	const MARKUP_ELEMENTS = array('s', 'e');
+
+	/** Elements of phpBB's stored XML that a reader sees on lines of their own. */
+	const BLOCK_ELEMENTS = array('QUOTE', 'LIST', 'LI', 'CODE', 'br', 'p');
+
+	/** Marks a block's edge while a text is read; never in phpBB's XML (not an XML character). */
+	const BREAK_MARK = "\x00";
+
 	/** What separates a title from the post's text in the text sent: a blank line. */
 	const TITLE_SEPARATOR = "\n\n";
 
@@ -122,13 +131,20 @@ class forum
 	}
 
 	/**
-	 * The words of a stored post, as the gateway should read them.
+	 * The words of a stored post, as the gateway should read them: as a reader sees them.
+	 *
+	 * Read from phpBB's stored XML here, not with phpBB's `clean_formatting()`: that one puts
+	 * a space where every BBCode tag sat, so `zak[b]a[/b]zane` would reach the gateway as
+	 * "zak a zane" while the reader sees one word (tests/fixtures/phpbb-3.3/). Inline
+	 * formatting (bold, colour, size, links, ...) adds nothing between the words; a block
+	 * (a quote, a list and its items, code, a line break) starts and ends a line.
 	 *
 	 * Quotes are kept, each introduced by its author ("Kasia napisał(a):"): whatever a post
-	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. The rest
-	 * loses its formatting (BBCode, links, smilies stay as their text), but the text of
-	 * `title` and `alt` attributes is kept, after the text: words can hide there as well.
-	 * The text is NOT shortened here.
+	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. Links,
+	 * images and smilies stay as their text, and the text of `title` and `alt` attributes is
+	 * kept, after the text: words can hide there as well. A stored text that is not phpBB's
+	 * XML is read with its markup, so that nothing in it is hidden. The text is NOT shortened
+	 * here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
 	 * @return string The plain text, trimmed.
@@ -140,19 +156,26 @@ class forum
 		{
 			return '';
 		}
-		$xml = (string) preg_replace_callback('#<QUOTE\b([^>]*)>#', function (array $m) {
-			$author = preg_match('/\sauthor="([^"]*)"/', $m[1], $found)
-				? trim(html_entity_decode($found[1], ENT_QUOTES | ENT_XML1, 'UTF-8')) : '';
-			$line = ($author !== '') ? htmlspecialchars($author . self::QUOTE_AUTHOR_SUFFIX, ENT_NOQUOTES, 'UTF-8') . "\n" : '';
-			return "\n" . $m[0] . $line;
-		}, $xml);
-		$xml = str_replace('</QUOTE>', "</QUOTE>\n", $xml);
-		$text = (string) $this->text_utils->clean_formatting($xml);
-		preg_match_all('/\s(?:title|alt)="([^"]*)"/', $xml, $found);
-		foreach ($found[1] as $attribute)
+		$dom = new \DOMDocument();
+		$errors = libxml_use_internal_errors(true);
+		$loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE);
+		libxml_clear_errors();
+		libxml_use_internal_errors($errors);
+		if (!$loaded || $dom->documentElement === null || $dom->doctype !== null)
 		{
-			$attribute = trim(html_entity_decode($attribute, ENT_QUOTES | ENT_XML1, 'UTF-8'));
-			if ($attribute !== '')
+			$text = html_entity_decode(strip_tags($xml), ENT_QUOTES, 'UTF-8');
+		}
+		else
+		{
+			$attributes = array();
+			$text = $this->node_text($dom->documentElement, $attributes);
+			// A block boundary is one line break, unless the author's own line breaks are there.
+			// (The pattern names the mark as \x00: PHP before 8.2 refuses a NUL byte in a pattern.)
+			$text = (string) preg_replace_callback('/[\x00\n]+/', function (array $m) {
+				$lines = substr_count($m[0], "\n");
+				return str_repeat("\n", max(1, $lines));
+			}, $text);
+			foreach ($attributes as $attribute)
 			{
 				$text .= "\n" . $attribute;
 			}
@@ -160,6 +183,54 @@ class forum
 		$text = str_replace(array("\r\n", "\r"), "\n", $text);
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
 		return is_string($trimmed) ? $trimmed : trim($text);
+	}
+
+	/**
+	 * The text of an element of phpBB's stored XML, with a {@see BREAK_MARK} at each block's
+	 * edges; collects the `title` and `alt` attributes on the way, in document order.
+	 *
+	 * @param \DOMNode         $node       The element.
+	 * @param array<int,string> $attributes The attributes' texts found so far.
+	 * @return string
+	 */
+	protected function node_text(\DOMNode $node, array &$attributes)
+	{
+		$text = '';
+		foreach ($node->childNodes as $child)
+		{
+			if ($child instanceof \DOMText)
+			{
+				$text .= $child->data;
+				continue;
+			}
+			if (!$child instanceof \DOMElement || in_array($child->nodeName, self::MARKUP_ELEMENTS, true))
+			{
+				continue;
+			}
+			foreach ($child->attributes as $attribute)
+			{
+				$value = in_array($attribute->nodeName, array('title', 'alt'), true) ? trim($attribute->nodeValue) : '';
+				if ($value !== '')
+				{
+					$attributes[] = $value;
+				}
+			}
+			$inner = $this->node_text($child, $attributes);
+			if ($child->nodeName === 'QUOTE')
+			{
+				$author = trim($child->getAttribute('author'));
+				$text .= self::BREAK_MARK . (($author !== '') ? $author . self::QUOTE_AUTHOR_SUFFIX . self::BREAK_MARK : '') . $inner . self::BREAK_MARK;
+			}
+			else if (in_array($child->nodeName, self::BLOCK_ELEMENTS, true))
+			{
+				$text .= self::BREAK_MARK . $inner . self::BREAK_MARK;
+			}
+			else
+			{
+				$text .= $inner;
+			}
+		}
+		return $text;
 	}
 
 	/**
