@@ -267,6 +267,39 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame(array('queued', '1'), array($this->row($post_id)['status'], (string) $this->row($post_id)['revision']));
 	}
 
+	public function test_a_disabled_board_stays_closed_to_every_other_script(): void
+	{
+		// Review of #7, N1: the webhook's path after another script (viewtopic.php/minos/webhook)
+		// got past the disabled board too. Only app.php serves the webhook.
+		$this->configure();
+		$this->login();
+		$this->create_topic(self::FORUM, 'Minos test closed topic', 'Treść tematu tylko dla włączonego forum.');
+		$this->logout();
+		$db = $this->get_db();
+		$result = $db->sql_query('SELECT topic_id FROM ' . TOPICS_TABLE . " WHERE topic_title = 'Minos test closed topic'");
+		$topic_id = (int) $db->sql_fetchfield('topic_id');
+		$db->sql_freeresult($result);
+		if (!$this->user_exists(self::AUTHOR))
+		{
+			$this->create_user(self::AUTHOR);
+		}
+		$this->login(self::AUTHOR);
+		$form = self::request('GET', 'posting.php?mode=post&f=' . self::FORUM . '&sid=' . $this->sid);
+		$fields = array_merge(array('subject' => 'Minos test closed post', 'message' => 'Testowy wpis na wyłączonym forum.', 'post' => true),
+			$this->get_hidden_fields($form, 'posting.php?mode=post&f=' . self::FORUM . '&sid=' . $this->sid));
+
+		$this->set_config('board_disable', '1');
+		$topic_page = self::request('POST', 'viewtopic.php/minos/webhook?t=' . $topic_id, array(), false)->text();
+		$posting_page = self::request('POST', 'posting.php/minos/webhook?mode=post&f=' . self::FORUM . '&sid=' . $this->sid, $fields, false)->text();
+		$this->set_config('board_disable', '0');
+		$this->logout();
+
+		$this->assertStringContainsString($this->lang('BOARD_DISABLE'), $topic_page);
+		$this->assertStringNotContainsString('Treść tematu tylko dla włączonego forum.', $topic_page, 'the topic is not shown');
+		$this->assertStringContainsString($this->lang('BOARD_DISABLE'), $posting_page);
+		$this->assertSame(0, $this->count_rows(POSTS_TABLE, "post_subject = 'Minos test closed post'"), 'nothing is posted');
+	}
+
 	public function test_deleting_the_data_removes_the_table_and_every_setting(): void
 	{
 		$this->configure();

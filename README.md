@@ -323,8 +323,10 @@ postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuj
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
 **Wyłączenie forum** (w panelu administracji „Wyłącz forum”, a także forum wyłączone przez
-phpBB po przekroczeniu limitu obciążenia) nie zatrzymuje oceniania: adres webhooka zostaje
-otwarty (wyłącznie on — każda inna strona pokazuje gościom „forum wyłączone”), więc werdykty
+phpBB po przekroczeniu limitu obciążenia) nie zatrzymuje oceniania: otwarte zostaje wyłącznie
+doręczenie werdyktu, czyli żądanie `POST` do `app.php/minos/webhook` (przy przyjaznych adresach
+URL: `/minos/webhook`); każde inne żądanie — także do innego skryptu forum z tą samą końcówką
+adresu, np. `viewtopic.php/minos/webhook` — dostaje stronę „forum wyłączone”, więc werdykty
 przychodzą i są stosowane jak decyzje moderatora, a czytelnicy zobaczą ich skutek po ponownym
 włączeniu forum. Bez tego phpBB odpowiadałby na doręczenie stroną „forum wyłączone” z kodem
 `200`, brama uznałaby werdykt za doręczony, a werdykt by przepadł. Sprawdza to test na

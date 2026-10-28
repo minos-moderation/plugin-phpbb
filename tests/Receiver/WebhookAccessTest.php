@@ -22,13 +22,22 @@ final class WebhookAccessTest extends TestCase
 	}
 
 	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function frontControllers(): array
+	{
+		return array('the board at the root' => array('/app.php'), 'the board in a directory' => array('/forum/app.php'));
+	}
+
+	/**
+	 * @dataProvider frontControllers
 	 * @runInSeparateProcess
 	 */
-	public function testADeliveryPassesADisabledAndAnOverloadedBoard(): void
+	public function testADeliveryPassesADisabledAndAnOverloadedBoard(string $script): void
 	{
 		$config = new \phpbb\config\config(array('limit_load' => '0.5', 'board_disable' => '1'));
 
-		(new webhook_access(new Request(array(), '{}', '/minos/webhook', 'POST'), $config))->let_deliveries_in(new \phpbb\event\data(array()));
+		(new webhook_access(new Request(array(), '{}', '/minos/webhook', 'POST', $script), $config))->let_deliveries_in(new \phpbb\event\data(array()));
 
 		self::assertTrue(defined('SKIP_CHECK_DISABLED') && SKIP_CHECK_DISABLED, 'phpBB skips the disabled board');
 		self::assertSame('0', $config['limit_load'], 'and the load limit, for this request');
@@ -36,15 +45,21 @@ final class WebhookAccessTest extends TestCase
 	}
 
 	/**
-	 * @return array<string,array{0:string,1:string}>
+	 * @return array<string,array{0:string,1:string,2:string}>
 	 */
 	public function otherRequests(): array
 	{
 		return array(
-			'the webhook, GET'       => array('/minos/webhook', 'GET'),
-			'another route'          => array('/minos/other', 'POST'),
-			'below the webhook'      => array('/minos/webhook/x', 'POST'),
-			'a page of the board'    => array('/', 'POST'),
+			'the webhook, GET'       => array('/app.php', '/minos/webhook', 'GET'),
+			'another route'          => array('/app.php', '/minos/other', 'POST'),
+			'below the webhook'      => array('/app.php', '/minos/webhook/x', 'POST'),
+			'a page of the board'    => array('/app.php', '/', 'POST'),
+			// The same path after another script (review of #7, N1): viewtopic.php/minos/webhook.
+			'viewtopic.php'          => array('/viewtopic.php', '/minos/webhook', 'POST'),
+			'index.php'              => array('/index.php', '/minos/webhook', 'POST'),
+			'posting.php'            => array('/forum/posting.php', '/minos/webhook', 'POST'),
+			'a name with app.php in it' => array('/myapp.php', '/minos/webhook', 'POST'),
+			'the path left in the name' => array('/app.php/minos/webhook', '/minos/webhook', 'POST'),
 		);
 	}
 
@@ -52,11 +67,11 @@ final class WebhookAccessTest extends TestCase
 	 * @dataProvider otherRequests
 	 * @runInSeparateProcess
 	 */
-	public function testNoOtherRequestPasses(string $path, string $method): void
+	public function testNoOtherRequestPasses(string $script, string $path, string $method): void
 	{
 		$config = new \phpbb\config\config(array('limit_load' => '0.5'));
 
-		(new webhook_access(new Request(array(), '', $path, $method), $config))->let_deliveries_in(new \phpbb\event\data(array()));
+		(new webhook_access(new Request(array(), '', $path, $method, $script), $config))->let_deliveries_in(new \phpbb\event\data(array()));
 
 		self::assertFalse(defined('SKIP_CHECK_DISABLED'));
 		self::assertSame('0.5', $config['limit_load']);

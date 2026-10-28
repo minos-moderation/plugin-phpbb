@@ -13,7 +13,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `ext.php` | Refuses to be enabled without phpBB 3.3, PHP 7.4, cURL or the bundled client. |
 | `client_loader.php` | Loads `Minos\Client` from the bundled `vendor/` (see "Composer"). |
 | `config/services.yml`, `config/routing.yml` | The services; the `POST /minos/webhook` route. |
-| `event/webhook_access.php` | The webhook only: past a disabled or overloaded board (`core.user_setup`). |
+| `event/webhook_access.php` | `POST` to `app.php/minos/webhook` only: past a disabled or overloaded board (`core.user_setup`). |
 | `event/acp_notice.php`, `adm/style/event/` | Every ACP page: what is missing while the extension is switched on without a usable configuration. |
 | `event/listener.php` | Posting: holds a new post (`force_approved_state`) and sends it once it has an id; re-assesses an edit of a waiting post. MCP: marks held posts. Notifications: keeps phpBB's "in the queue" notice of a held post on the board only. |
 | `service/submitter.php`, `service/curl_transport.php` | `POST /api/v1/b2b/oceny` and every class of answer. |
@@ -87,13 +87,22 @@ decision).
   answers a guest on a disabled board (`board_disable`) or over its load limit (`limit_load`)
   with its own page and `200` before any route runs, which the gateway takes as delivered: the
   verdict would be lost. `event/webhook_access.php`, on `core.user_setup` (triggered before
-  both checks), for `POST /minos/webhook` only (`getPathInfo()` of phpBB's `symfony_request`,
-  the same with or without `app.php`), defines `SKIP_CHECK_DISABLED` - phpBB's own way past the
+  both checks), for a request that is all three - `app.php` as the script
+  (`basename(getScriptName())` of phpBB's `symfony_request`), `/minos/webhook` as the path after
+  it (`getPathInfo()`) and `POST` - defines `SKIP_CHECK_DISABLED` - phpBB's own way past the
   disabled board, as `ucp.php` and `memberlist.php` use it - and sets `limit_load` to `0` in
   memory for that request (phpBB itself sets `board_disable` in memory there). The verdict is
   applied as a moderator would apply it; readers see nothing until the board is enabled. No
-  other route or method passes (`tests/Receiver/WebhookAccessTest.php`, each case in its own
-  process; the live board's suite). Not covered, and written in the README: phpBB's check for
+  other script, route or method passes (`tests/Receiver/WebhookAccessTest.php`, each case in
+  its own process; the live board's suite). The script is checked because the path is what
+  follows the script's name: `viewtopic.php/minos/webhook` has the path `/minos/webhook` too,
+  and before the check it showed a topic on a disabled board (review of #7, N1). `SCRIPT_NAME`
+  is the script the server runs on PHP's built-in server, Apache (mod_php, FPM) and nginx
+  with `fastcgi_split_path_info`; with URL rewriting (phpBB's `.htaccess`, its nginx sample)
+  `/minos/webhook` reaches `app.php`, whose `SCRIPT_NAME` is `<board path>/app.php`. A server
+  that leaves the path in `SCRIPT_NAME` gives a name other than `app.php`: the webhook then
+  stays closed on a disabled board, never another script open. phpBB's other `app.php`,
+  `install/app.php`, runs the installer's container, which loads no extension. Not covered, and written in the README: phpBB's check for
   its `install/` directory (an update of phpBB in progress, `allow_install_dir` off), which
   answers the same `200` page and respects no constant the extension may define; the README
   advises switching the assessment off for an update of phpBB.
@@ -273,7 +282,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 
 | Suite | What it proves |
 |---|---|
-| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `WebhookAccessTest`: `POST /minos/webhook` passes a disabled and an overloaded board, no other path or method does. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
+| `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `WebhookAccessTest`: `POST` to `app.php/minos/webhook` (at the root or in a directory) passes a disabled and an overloaded board; no other script with that path (`viewtopic.php`, `index.php`, `posting.php`, `myapp.php`, the path left in the name), path or method does. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing; a bare or `[url]` address is text). |
 | `tests/Posting` | Which posts are held (every post covered; one without text to assess - each F7 fixture of the real formatter, in both modes - the failure mode at once and no request; an address a reader sees sent with its link; an image's title beside text only; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
@@ -309,7 +318,9 @@ mock's signed delivery through `app.php/minos/webhook` publishing it; a mask (th
 `██████`); `zablokowane` held, with the MCP queue's mark and details; a delivery signed with
 another secret and one 301 s old refused with the same empty `401`, nothing applied, traced
 for the ACP (the clock named) and forgotten after the gateway's own delivery; the webhook while the
-board is disabled, the assessment switched off and the extension disabled; "Delete data"
+board is disabled, the assessment switched off and the extension disabled; on a disabled
+board, the webhook's path after another script (`viewtopic.php`, `posting.php`) kept closed;
+"Delete data"
 removing the table, every `config` and `config_text` value, the ACP modules and the
 migrations. The queue e-mail to moderators (audit R20, K-60) is checked in phpBB's own e-mail
 queue (`cache/<environment>/queue.php`; phpBB queues e-mails by default) for an administrator
@@ -354,7 +365,9 @@ What the live board showed (2026-10-28, phpBB 3.3.19 at `6c75df1`, PHP 8.3, MySQ
   ran (`user::setup()` -> `trigger_error()`), so the gateway took the delivery as done and the
   verdict was lost (a bot gets `503`; the gateway is not one). Since the review of #7,
   `event/webhook_access.php` keeps the webhook open (see "Decisions worth knowing"); the suite
-  delivers to a disabled board and sees `200` with the controller's empty body, the verdict
+  delivers to a disabled board and sees `200` with the controller's empty body, while
+  `POST viewtopic.php/minos/webhook` gets phpBB's "board disabled" page without the topic and
+  `POST posting.php/minos/webhook` by a member posts nothing; the verdict
   applied and every other page still disabled.
 - **The webhook while the extension is disabled** in the extension manager: `404`, phpBB's
   HTML page (the route does not exist); the gateway retries until its TTL. Switched off in the
