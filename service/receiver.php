@@ -87,7 +87,7 @@ class receiver
 		// A row of another revision, or one that is not waiting, fails the conditional update.
 		$verdict = ($payload['status'] === WebhookPayload::ASSESSED) ? (string) $payload['kwalifikacja'] : WebhookPayload::UNASSESSED;
 		$recorded = $this->store->record_verdict($post_id, $revision, $verdict, $payload['kategorie'],
-			$payload['wsparcie'], $payload['ocenzurowany']);
+			$payload['wsparcie'], $payload['ocenzurowany'], '', (int) $now);
 
 		return array(200, $recorded ? $post_id : null);
 	}

@@ -196,6 +196,16 @@ przekierowaniem.
   sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
   awarii).
 
+## Czas do werdyktu i liczba werdyktów
+
+Strona ustawień pokazuje dla ostatnich 7 dni medianę (P50) i 95. percentyl (P95) czasu od
+przyjęcia postu przez bramę (odpowiedź `202`) do doręczenia werdyktu na webhook, liczbę
+werdyktów `bezpieczne`, `ocenzurowane`, `zablokowane` i `nieocenione` oraz liczbę postów, na
+które werdykt nie nadszedł w czasie oczekiwania. Liczby powstają z dwóch chwil zapisanych przy
+każdym poście w tabeli rozszerzenia (przyjęcie i doręczenie); nie zawierają treści postów ani
+klucza i nie wymagają żadnych dodatkowych zapytań do bramy. Po poprawce postu czekającego na
+werdykt liczy się tylko ocena nowej wersji.
+
 ## Wsparcie
 
 Gdy brama zaznaczy `wsparcie` (treść może świadczyć o samookaleczeniu lub kryzysie autora),

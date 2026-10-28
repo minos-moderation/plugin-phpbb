@@ -9,6 +9,7 @@ use minos\moderation\migrations\install_data;
 use minos\moderation\migrations\install_schema;
 use minos\moderation\migrations\shared_pause;
 use minos\moderation\migrations\user_groups;
+use minos\moderation\migrations\verdict_times;
 use minos\moderation\service\settings;
 use PHPUnit\Framework\TestCase;
 
@@ -87,6 +88,7 @@ final class ExtensionTest extends TestCase
 		self::assertSame(array(), $settings->forum_ids());
 		self::assertSame(array(), $settings->group_ids(), 'every group, as before the setting');
 		self::assertSame(array('\minos\moderation\migrations\shared_pause'), user_groups::depends_on());
+		self::assertSame(array('\minos\moderation\migrations\user_groups'), verdict_times::depends_on());
 		self::assertNull($settings->pause(time()), 'no pause of the gateway yet');
 		self::assertTrue($pause->effectively_installed());
 		self::assertSame(array('\minos\moderation\migrations\install_data'), gateway_pause::depends_on());
@@ -95,6 +97,14 @@ final class ExtensionTest extends TestCase
 		self::assertSame(2, $modules, 'a category and the settings page');
 		self::assertSame(array('\minos\moderation\migrations\install_schema'), install_data::depends_on());
 		self::assertSame(array('\phpbb\db\migration\data\v330\v330'), install_schema::depends_on());
+	}
+
+	public function testTheVerdictTimeColumnIsAddedAndTakenBackWithTheExtensionsData(): void
+	{
+		$migration = new verdict_times(new \phpbb\config\config(), new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+
+		self::assertSame(array('received_at' => array('TIMESTAMP', 0)), $migration->update_schema()['add_columns']['phpbb_minos_pending']);
+		self::assertSame(array('received_at'), $migration->revert_schema()['drop_columns']['phpbb_minos_pending']);
 	}
 
 	public function testAnUnrecognisedStoredValueNeverPublishesByItself(): void

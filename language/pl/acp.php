@@ -72,6 +72,15 @@ $lang = array_merge($lang, array(
 	'MINOS_LAST_ERROR'           => 'Ostatni błąd konfiguracji',
 	'MINOS_LAST_ERROR_EXPLAIN'   => 'Brama odrzuciła żądanie, a posty obsłużono zgodnie z trybem awarii. Wpis jest też w dzienniku błędów.',
 
+	'MINOS_STATS'                => 'Ostatnie 7 dni',
+	'MINOS_STATS_EXPLAIN'        => 'Liczone z zapisów rozszerzenia na tym forum, bez treści postów i bez dodatkowych zapytań do bramy: czas od przyjęcia postu przez bramę (odpowiedź 202) do doręczenia werdyktu oraz werdykty doręczone w ostatnich 7 dniach.',
+	'MINOS_STATS_WAIT'           => 'Czas do werdyktu: mediana (P50) %1$s, P95 %2$s (z %3$d werdyktów).',
+	'MINOS_STATS_VERDICTS'       => 'Werdykty: bezpieczne — %1$d, ocenzurowane — %2$d, zablokowane — %3$d, nieocenione — %4$d. Bez werdyktu w czasie oczekiwania: %5$d.',
+	'MINOS_STATS_EMPTY'          => 'Brak werdyktów z ostatnich 7 dni.',
+	'MINOS_DURATION_S'           => '%d s',
+	'MINOS_DURATION_MIN'         => '%1$d min %2$d s',
+	'MINOS_DURATION_H'           => '%1$d h %2$d min',
+
 	'MINOS_RECENT'               => 'Ostatnio oceniane posty',
 	'MINOS_RECENT_EXPLAIN'       => 'Oczekujące na werdykt: %1$d, w kolejce do zatwierdzenia: %2$d. Wpisy są usuwane 30 dni po rozstrzygnięciu.',
 	'MINOS_RECENT_EMPTY'         => 'Brak postów.',

@@ -115,6 +115,15 @@
 
 </form>
 
+<h2>{L_MINOS_STATS}</h2>
+<p>{L_MINOS_STATS_EXPLAIN}</p>
+<!-- IF S_MINOS_STATS -->
+<!-- IF MINOS_STATS_WAIT --><p>{MINOS_STATS_WAIT}</p><!-- ENDIF -->
+<p>{MINOS_STATS_VERDICTS}</p>
+<!-- ELSE -->
+<p>{L_MINOS_STATS_EMPTY}</p>
+<!-- ENDIF -->
+
 <h2>{L_MINOS_RECENT}</h2>
 <p>{MINOS_RECENT_EXPLAIN}</p>
 

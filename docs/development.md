@@ -25,7 +25,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `cron/sweeper.php` | Every 5 minutes: time-outs, retries, leftovers, pruning. |
 | `acp/`, `controller/acp.php`, `adm/style/` | The ACP page. |
 | `styles/all/template/event/` | The MCP note above a queued post. |
-| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`). |
+| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`); the user groups (`user_groups`); the time a verdict arrived (`verdict_times`). |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 | `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
@@ -137,6 +137,15 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
   A `500`, `502`, `504` or a `2xx` that is not the gateway's acceptance is retried per row
   and pauses nothing. The ACP shows the pause with its kind and hour, never the key or a
   body; the next `202` forgets it.
+- **The time to a verdict is measured on the forum** (audit K-36). `received_at` (migration
+  `verdict_times`) is when the gateway's outcome arrived (`record_verdict`, from the
+  receiver's `$now`; the extension's own outcomes keep 0); `submitted_at` is the `202`. The
+  ACP shows, for the last 7 days, the median and P95 of their difference by nearest rank
+  (`pending_store::verdict_stats`: two counts and two one-row `ORDER BY ... LIMIT` queries,
+  measured only where `received_at >= submitted_at`, so the unsigned subtraction never goes
+  negative), the counts of the four verdicts and of the time-outs handled since. A late
+  verdict for a timed-out row counts with its true wait; an edit (a new revision) resets
+  `received_at`. Times and counts only; no request to the gateway.
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
@@ -183,7 +192,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
-| `tests/Acp` | Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
+| `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |
 | `tests/Repo` | The Claude Code rules, the language files, no PHP 8-only functions. |

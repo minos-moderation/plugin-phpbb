@@ -18,8 +18,8 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 /**
  * The ACP page "Minos": the settings, the webhook URL to register with the key, the
  * gateway's pause of sending (the key's limits, an overload, an unavailable gateway) until
- * its next acceptance, the last refusal of the gateway, and the posts the extension handled
- * lately.
+ * its next acceptance, the last refusal of the gateway, how long the gateway's verdicts took
+ * and how many of each it gave in the last 7 days, and the posts the extension handled lately.
  *
  * The key and the secret are write-only here: the form never carries them back, the page
  * shows a prefix of each, and an empty field keeps the stored value.
@@ -31,6 +31,9 @@ class acp
 
 	/** Rows in the list of recent posts. */
 	const RECENT = 50;
+
+	/** Days the verdict times and counts cover. */
+	const STATS_DAYS = 7;
 
 	/** The webhook route's name. */
 	const WEBHOOK_ROUTE = 'minos_moderation_webhook';
@@ -145,6 +148,8 @@ class acp
 		$pause = $this->settings->pause(time());
 		$counts = $this->store->counts() + array_fill_keys(pending_store::UNSETTLED, 0) + array(pending_store::HELD => 0);
 		$waiting = $counts[pending_store::QUEUED] + $counts[pending_store::PENDING] + $counts[pending_store::RECEIVED];
+		$stats = $this->store->verdict_stats(time() - self::STATS_DAYS * 86400);
+		$verdicts = $stats['verdicts'];
 		$this->template->assign_vars(array(
 			'U_ACTION'              => $u_action,
 			'S_MINOS_SAVED'         => $saved,
@@ -168,6 +173,11 @@ class acp
 			'MINOS_LAST_ERROR_HELP' => ($last_error !== null) ? self::escape($this->error_help($last_error['code'])) : '',
 			'MINOS_LAST_ERROR_TIME' => ($last_error !== null) ? $this->user->format_date($last_error['time']) : '',
 			'MINOS_RECENT_EXPLAIN'  => self::escape($this->language->lang('MINOS_RECENT_EXPLAIN', $waiting, $counts[pending_store::HELD])),
+			'S_MINOS_STATS'         => ($stats['count'] + array_sum($verdicts) + $stats['timeouts']) > 0,
+			'MINOS_STATS_WAIT'      => ($stats['count'] > 0) ? self::escape($this->language->lang('MINOS_STATS_WAIT',
+				$this->duration((int) $stats['p50']), $this->duration((int) $stats['p95']), $stats['count'])) : '',
+			'MINOS_STATS_VERDICTS'  => self::escape($this->language->lang('MINOS_STATS_VERDICTS', $verdicts['bezpieczne'],
+				$verdicts['ocenzurowane'], $verdicts['zablokowane'], $verdicts['nieocenione'], $stats['timeouts'])),
 			'S_FORUM_OPTIONS'       => make_forum_select($this->settings->forum_ids(), false, true, true, true, false, false),
 			'S_MINOS_ALL_FORUMS'    => !$this->settings->forum_ids(),
 			'S_MINOS_ALL_GROUPS'    => !$this->settings->group_ids(),
@@ -282,6 +292,27 @@ class acp
 	{
 		$url = $this->settings->gateway_url();
 		return ($url !== '') ? $url : settings::DEFAULT_GATEWAY_URL;
+	}
+
+	/**
+	 * A time span as the administrator reads it: seconds, minutes and seconds, or hours and
+	 * minutes.
+	 *
+	 * @param int $seconds The span.
+	 * @return string
+	 */
+	protected function duration($seconds)
+	{
+		$seconds = max(0, (int) $seconds);
+		if ($seconds < 60)
+		{
+			return $this->language->lang('MINOS_DURATION_S', $seconds);
+		}
+		if ($seconds < 3600)
+		{
+			return $this->language->lang('MINOS_DURATION_MIN', intdiv($seconds, 60), $seconds % 60);
+		}
+		return $this->language->lang('MINOS_DURATION_H', intdiv($seconds, 3600), intdiv($seconds % 3600, 60));
 	}
 
 	/**

@@ -7,6 +7,7 @@ use minos\moderation\cron\sweeper;
 use minos\moderation\event\deferred_verdicts;
 use minos\moderation\event\listener;
 use minos\moderation\migrations\install_schema;
+use minos\moderation\migrations\verdict_times;
 use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\receiver;
@@ -463,7 +464,7 @@ class Board
 
 	/**
 	 * Creates phpBB's tables (the columns the extension and the fakes touch) and the
-	 * extension's own table, from its migration.
+	 * extension's own table, from its migrations (the table, then the columns added later).
 	 *
 	 * @return void
 	 */
@@ -508,6 +509,22 @@ class Board
 				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', (array) $key[1]) . ')');
 			}
 		}
+		$later = new verdict_times(new \phpbb\config\config(), $this->db, null, './', 'php', self::PREFIX);
+		$changes = $later->update_schema();
+		foreach ($changes['add_columns'] as $table => $columns)
+		{
+			foreach ($columns as $name => $definition)
+			{
+				$this->db->pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . self::column($name, $definition));
+			}
+		}
+		foreach ($changes['add_index'] as $table => $indexes)
+		{
+			foreach ($indexes as $name => $columns)
+			{
+				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', $columns) . ')');
+			}
+		}
 	}
 
 	/**
@@ -522,12 +539,24 @@ class Board
 		$columns = array();
 		foreach ($schema['COLUMNS'] as $name => $definition)
 		{
-			list($type, $default) = $definition;
-			$sql_type = preg_match('/^(VCHAR|MTEXT)/', $type) ? 'TEXT' : 'INTEGER';
-			$columns[] = $name . ' ' . $sql_type . ' NOT NULL DEFAULT ' . (is_int($default) ? $default : "'" . $default . "'");
+			$columns[] = self::column($name, $definition);
 		}
 		$columns[] = 'PRIMARY KEY (' . implode(', ', (array) $schema['PRIMARY_KEY']) . ')';
 		return 'CREATE TABLE ' . $table . ' (' . implode(', ', $columns) . ')';
+	}
+
+	/**
+	 * One column of phpBB's schema array as SQLite DDL.
+	 *
+	 * @param string            $name
+	 * @param array{0:string,1:int|string} $definition The type and the default.
+	 * @return string
+	 */
+	public static function column($name, array $definition)
+	{
+		list($type, $default) = $definition;
+		$sql_type = preg_match('/^(VCHAR|MTEXT)/', $type) ? 'TEXT' : 'INTEGER';
+		return $name . ' ' . $sql_type . ' NOT NULL DEFAULT ' . (is_int($default) ? $default : "'" . $default . "'");
 	}
 
 	/**
