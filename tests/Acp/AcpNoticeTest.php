@@ -68,6 +68,24 @@ final class AcpNoticeTest extends TestCase
 		}
 	}
 
+	public function testTheNoticeIsEscapedForThePage(): void
+	{
+		$this->board->configure(array(), array(settings::API_KEY => ''));
+		$language = new class(__DIR__ . '/../../language/pl') extends \phpbb\language\language {
+			public function lang()
+			{
+				$args = func_get_args();
+				return ($args[0] === 'MINOS_PROBLEM_API_KEY') ? 'brak <b>klucza</b> & "API"' : parent::lang(...$args);
+			}
+		};
+		$notice = new acp_notice($this->board->settings, $this->template, $language);
+
+		$notice->show_problems(new \phpbb\event\data(array('page_title' => 'Panel administracji', 'adm_page_header_override' => false)));
+
+		self::assertStringContainsString('brak &lt;b&gt;klucza&lt;/b&gt; &amp; &quot;API&quot;', $this->template->vars['MINOS_NOT_READY_NOTICE']);
+		self::assertStringNotContainsString('<b>', $this->template->vars['MINOS_NOT_READY_NOTICE'], 'phpBB prints template variables as they are');
+	}
+
 	/**
 	 * @return array<string,array{0:array<string,mixed>,1:array<string,string>}>
 	 */

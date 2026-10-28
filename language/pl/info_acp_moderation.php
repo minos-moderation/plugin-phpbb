@@ -26,8 +26,8 @@ $lang = array_merge($lang, array(
 	// Shown on every ACP page while the extension is switched on but cannot submit posts.
 	'MINOS_NOT_READY_NOTICE'       => 'Minos: ocenianie postów jest włączone, ale rozszerzenie nie może wysyłać postów do oceny (%s). Każdy nowy post od razu obsługuje tryb awarii. Uzupełnij ustawienia: Rozszerzenia → Minos → Ustawienia moderacji.',
 	'MINOS_PROBLEM_GATEWAY_URL'    => 'brak poprawnego adresu bramy',
-	'MINOS_PROBLEM_API_KEY'        => 'brak klucza API',
-	'MINOS_PROBLEM_WEBHOOK_SECRET' => 'brak sekretu webhooka',
+	'MINOS_PROBLEM_API_KEY'        => 'brak poprawnego klucza API',
+	'MINOS_PROBLEM_WEBHOOK_SECRET' => 'brak poprawnego sekretu webhooka',
 
 	'LOG_MINOS_SETTINGS_UPDATED' => '<strong>Zmieniono ustawienia rozszerzenia Minos</strong>',
 	'LOG_MINOS_ROW_FAILED'       => '<strong>Minos: nie udało się obsłużyć postu</strong><br />» krok %1$s, post %2$s; ponowna próba w kolejnym przebiegu zadania cron',

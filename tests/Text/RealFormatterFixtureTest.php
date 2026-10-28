@@ -128,6 +128,15 @@ final class RealFormatterFixtureTest extends TestCase
 		self::assertStringStartsWith('Stary', $text);
 	}
 
+	public function testAStoredTextWithADocumentTypeIsNotReadAsPhpbbsXml(): void
+	{
+		// phpBB never stores a DTD; one could declare entities whose references the reading
+		// of phpBB's XML would drop. Read as it is, nothing in it disappears.
+		$text = Board::open()->forum->plain_text('<!DOCTYPE r [<!ENTITY x "ukryte">]><r>a&x;b</r>');
+
+		self::assertStringContainsString('&x;', $text);
+	}
+
 	/**
 	 * An approved topic for a reply, so that the text sent is the post's alone.
 	 */
