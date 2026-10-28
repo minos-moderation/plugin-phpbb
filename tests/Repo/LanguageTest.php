@@ -79,7 +79,7 @@ final class LanguageTest extends TestCase
 		{
 			$used['MINOS_MCP_VERDICT_' . $verdict] = 'event/listener.php';
 		}
-		foreach (array('LIMIT', 'OVERLOAD') as $pause)
+		foreach (array('LIMIT', 'OVERLOAD', 'KEY', 'UNAVAILABLE') as $pause)
 		{
 			$used['MINOS_PAUSE_' . $pause] = 'controller/acp.php';
 		}

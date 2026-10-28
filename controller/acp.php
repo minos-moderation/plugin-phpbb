@@ -16,8 +16,9 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
  * The ACP page "Minos": the settings, the webhook URL to register with the key, the
- * gateway's pause (a spent daily limit, an overload) until its next acceptance, the last
- * refusal of the gateway, and the posts the extension handled lately.
+ * gateway's pause of sending (the key's limits, an overload, an unavailable gateway) until
+ * its next acceptance, the last refusal of the gateway, and the posts the extension handled
+ * lately.
  *
  * The key and the secret are write-only here: the form never carries them back, the page
  * shows a prefix of each, and an empty field keeps the stored value.

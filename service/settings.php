@@ -59,6 +59,15 @@ class settings
 	/** The gateway's pause: it is overloaded (`limit_globalny_b2b`, `kolejka_pelna`). */
 	const PAUSE_OVERLOAD = 'overload';
 
+	/** The gateway's pause: the key's minute or in-flight limit (`limit_minutowy_klucza`, `limit_w_locie_klucza`, another `429`). */
+	const PAUSE_KEY = 'key';
+
+	/** The gateway's pause: it is unavailable (`503`, no answer at all). */
+	const PAUSE_UNAVAILABLE = 'unavailable';
+
+	/** Every kind of the gateway's pause. */
+	const PAUSE_KINDS = array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD, self::PAUSE_KEY, self::PAUSE_UNAVAILABLE);
+
 	/** Characters of the key shown back to the administrator (`wgb2b_` and four more). */
 	const KEY_HINT_LENGTH = 10;
 
@@ -78,6 +87,7 @@ class settings
 	const LAST_SWEEP = 'minos_moderation_last_sweep';
 	const PAUSE_KIND = 'minos_moderation_pause_kind';
 	const PAUSE_UNTIL = 'minos_moderation_pause_until';
+	const PAUSE_CODE = 'minos_moderation_pause_code';
 
 	/** `config_text` keys. */
 	const API_KEY = 'minos_moderation_api_key';
@@ -317,17 +327,20 @@ class settings
 	}
 
 	/**
-	 * Remembers that the gateway accepts no post before a moment, for the ACP: the key's daily
-	 * limit is spent ({@see PAUSE_LIMIT}) or the gateway is overloaded ({@see PAUSE_OVERLOAD}).
-	 * Only the kind and the moment: never the key, a request or a response.
+	 * Remembers that the gateway accepts no post before a moment: nothing is sent until then,
+	 * neither from an author's request nor from the cron task (the shared pause of sending),
+	 * and the ACP says why. Only the kind, the refusal's code and the moment: never the key, a
+	 * request or a response.
 	 *
-	 * @param string $kind  {@see PAUSE_LIMIT} or {@see PAUSE_OVERLOAD}.
+	 * @param string $kind  One of {@see PAUSE_KINDS}; anything else reads as {@see PAUSE_UNAVAILABLE}.
+	 * @param string $code  The refusal's `kod`, or the extension's own label (`network`, `http_503`).
 	 * @param int    $until Unix seconds.
 	 * @return void
 	 */
-	public function record_pause($kind, $until)
+	public function record_pause($kind, $code, $until)
 	{
-		$this->config->set(self::PAUSE_KIND, ($kind === self::PAUSE_LIMIT) ? self::PAUSE_LIMIT : self::PAUSE_OVERLOAD);
+		$this->config->set(self::PAUSE_KIND, in_array($kind, self::PAUSE_KINDS, true) ? $kind : self::PAUSE_UNAVAILABLE);
+		$this->config->set(self::PAUSE_CODE, preg_match('/^[a-z0-9_]{1,40}$/', (string) $code) ? (string) $code : '');
 		$this->config->set(self::PAUSE_UNTIL, (int) $until, false);
 	}
 
@@ -341,6 +354,7 @@ class settings
 		if ((string) $this->config[self::PAUSE_KIND] !== '' || (int) $this->config[self::PAUSE_UNTIL] !== 0)
 		{
 			$this->config->set(self::PAUSE_KIND, '');
+			$this->config->set(self::PAUSE_CODE, '');
 			$this->config->set(self::PAUSE_UNTIL, 0, false);
 		}
 	}
@@ -349,17 +363,17 @@ class settings
 	 * The gateway's pause, while it lasts.
 	 *
 	 * @param int $now Unix seconds.
-	 * @return array{kind:string,until:int}|null Null when there is none, or it is over.
+	 * @return array{kind:string,code:string,until:int}|null Null when there is none, or it is over.
 	 */
 	public function pause($now)
 	{
 		$kind = (string) $this->config[self::PAUSE_KIND];
 		$until = (int) $this->config[self::PAUSE_UNTIL];
-		if ($until <= (int) $now || !in_array($kind, array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD), true))
+		if ($until <= (int) $now || !in_array($kind, self::PAUSE_KINDS, true))
 		{
 			return null;
 		}
-		return array('kind' => $kind, 'until' => $until);
+		return array('kind' => $kind, 'code' => (string) $this->config[self::PAUSE_CODE], 'until' => $until);
 	}
 
 	/**

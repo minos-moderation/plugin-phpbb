@@ -338,19 +338,23 @@ final class SubmitterTest extends TestCase
 
 	public function testAnItemThatSpoilsABatchFailsAloneAndTheRestGoesAgain(): void
 	{
-		$this->gateway->refuse(503, 'kolejka_niedostepna');
+		// The second post is not sent: the first one's 503 paused sending.
 		$this->gateway->refuse(503, 'kolejka_niedostepna');
 		$first = $this->board->posting('Pierwszy testowy wpis.')['post_id'];
 		$second = $this->board->posting('Drugi testowy wpis.')['post_id'];
 
-		$this->gateway->refuse(400, 'bledny_identyfikator', null, 1);
+		$this->gateway->refuse(400, 'bledny_identyfikator', null, 0);
 		$later = time() + 61;
 		$this->board->submitter->submit($this->board->store->due($later, 10), $later);
 
-		self::assertCount(2, $this->gateway->items(2), 'the retry is one batch');
-		self::assertSame(array('phpbb:' . $first), array_column($this->gateway->items(3), 'id'), 'sent again without the spoiling item');
-		self::assertSame(pending_store::PENDING, $this->board->row($first)['status']);
-		self::assertSame(pending_store::VERDICT_REFUSED, $this->board->row($second)['verdict']);
+		$batch = array_column($this->gateway->items(1), 'id');
+		sort($batch);
+		self::assertSame(array('phpbb:' . $first, 'phpbb:' . $second), $batch, 'the retry is one batch');
+		$spoiling = $this->gateway->items(1)[0]['id'];
+		$other = $this->gateway->items(1)[1]['id'];
+		self::assertSame(array($other), array_column($this->gateway->items(2), 'id'), 'sent again without the spoiling item');
+		self::assertSame(pending_store::PENDING, $this->board->row(submitter::parse_item_id($other)[0])['status']);
+		self::assertSame(pending_store::VERDICT_REFUSED, $this->board->row(submitter::parse_item_id($spoiling)[0])['verdict']);
 	}
 
 	public function testAPostNoLongerWaitingIsNotSentAgain(): void
@@ -443,6 +447,122 @@ final class SubmitterTest extends TestCase
 
 		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
 		self::assertNull($this->board->settings->pause($now), 'the first 202 clears it');
+	}
+
+	public function testThreePostsInAMinuteAfterTheKeysMinuteLimitMakeOneRefusedRequest(): void
+	{
+		// Audit W-2 / C-22, the other way round: every post of the minute used to be sent and
+		// refused, each refusal spending the key's allowance.
+		$this->gateway->refuse(429, 'limit_minutowy_klucza', 60);
+		$now = time();
+
+		$ids = array();
+		foreach (array('Pierwszy', 'Drugi', 'Trzeci') as $word)
+		{
+			$ids[] = $this->board->posting($word . ' wpis w tej samej minucie.')['post_id'];
+		}
+
+		self::assertCount(1, $this->gateway->requests, 'one refused request, not three');
+		foreach ($ids as $id)
+		{
+			self::assertSame(pending_store::QUEUED, $this->board->row($id)['status'], 'held for the cron task');
+			self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		}
+		self::assertSame(array('0', '0'), array($this->board->row($ids[1])['attempts'], $this->board->row($ids[2])['attempts']),
+			'the others were never sent');
+		self::assertSame(settings::PAUSE_KEY, $this->board->settings->pause($now)['kind']);
+
+		$this->board->sweeper()->sweep($now + 61);
+
+		self::assertCount(2, $this->gateway->requests);
+		self::assertCount(3, $this->gateway->items(1), 'after the pause, the three go in one batch');
+		foreach ($ids as $id)
+		{
+			self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		}
+		self::assertNull($this->board->settings->pause($now), 'the 202 ends the pause');
+	}
+
+	/**
+	 * @return array<string,array{0:int|null,1:string,2:string|null}>
+	 */
+	public function answersThatPause(): array
+	{
+		return array(
+			'the key\'s minute limit'    => array(429, 'limit_minutowy_klucza', settings::PAUSE_KEY),
+			'the key\'s in-flight limit' => array(429, 'limit_w_locie_klucza', settings::PAUSE_KEY),
+			'a 429 of another code'      => array(429, 'zbyt_wiele', settings::PAUSE_KEY),
+			'the key\'s daily limit'     => array(429, 'limit_dobowy_klucza', settings::PAUSE_LIMIT),
+			'the shared B2B ceiling'     => array(429, 'limit_globalny_b2b', settings::PAUSE_OVERLOAD),
+			'a full queue'               => array(429, 'kolejka_pelna', settings::PAUSE_OVERLOAD),
+			'a 503'                      => array(503, 'kolejka_niedostepna', settings::PAUSE_UNAVAILABLE),
+			'no answer at all'           => array(null, 'network', settings::PAUSE_UNAVAILABLE),
+			'a 500 does not pause'       => array(500, 'blad_wewnetrzny', null),
+			'a 2xx that is not an acceptance does not pause' => array(200, 'bad_answer', null),
+		);
+	}
+
+	/**
+	 * @dataProvider answersThatPause
+	 */
+	public function testAnAnswerThatAsksToWaitPausesAllSending(?int $status, string $code, ?string $kind): void
+	{
+		if ($status === null)
+		{
+			$this->gateway->script[] = null;
+		}
+		else if ($status === 200)
+		{
+			$this->gateway->script[] = array('status' => 200, 'body' => '{}');
+		}
+		else
+		{
+			$this->gateway->refuse($status, $code);
+		}
+		$now = time();
+		$this->board->posting('Wpis, na który brama odpowiada.');
+		$this->board->posting('Kolejny wpis tuż potem.');
+
+		$pause = $this->board->settings->pause($now);
+		if ($kind === null)
+		{
+			self::assertNull($pause);
+			self::assertCount(2, $this->gateway->requests, 'the next post is sent as usual');
+			return;
+		}
+		self::assertSame(array('kind' => $kind, 'code' => $code), array('kind' => $pause['kind'], 'code' => $pause['code']));
+		self::assertEqualsWithDelta($now + 60, $pause['until'], 2, 'without ponow_za_s, a minute');
+		self::assertCount(1, $this->gateway->requests, 'nothing else is sent while it lasts');
+	}
+
+	public function testAPostWhoseWaitEndsBeforeThePauseGetsTheFailureModeAtOnceUnsent(): void
+	{
+		$this->gateway->refuse(429, 'limit_dobowy_klucza', 36000);
+		$this->board->posting('Wpis, który wyczerpał limit dobowy.');
+
+		$id = $this->board->posting('Wpis po wyczerpaniu limitu.')['post_id'];
+
+		self::assertCount(1, $this->gateway->requests, 'the second post is not sent to be refused again');
+		$row = $this->board->row($id);
+		self::assertSame(array(pending_store::HELD, pending_store::VERDICT_TIMEOUT, 'limit_dobowy_klucza', '0'),
+			array($row['status'], $row['verdict'], $row['error_code'], $row['attempts']));
+	}
+
+	public function testAPostWhoseWaitOutlastsThePauseWaitsForTheCronTask(): void
+	{
+		$this->board->configure(array(settings::TIMEOUT_MIN => 1440));
+		$this->gateway->refuse(429, 'limit_dobowy_klucza', 36000);
+		$now = time();
+		$this->board->posting('Wpis, który wyczerpał limit dobowy.');
+		$id = $this->board->posting('Wpis z dobą na werdykt.')['post_id'];
+
+		self::assertSame(pending_store::QUEUED, $this->board->row($id)['status']);
+		$this->board->sweeper()->sweep($now + 35000);
+		self::assertCount(1, $this->gateway->requests, 'the cron task sends nothing during the pause');
+
+		$this->board->sweeper()->sweep($now + 36001);
+		self::assertCount(2, $this->gateway->requests);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
 	}
 
 	public function testANewTopicIsSentWithItsTitleFirst(): void

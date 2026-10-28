@@ -214,6 +214,8 @@ final class AcpControllerTest extends TestCase
 
 	public function testASpentDailyLimitIsShownWithItsHourUntilTheNextAcceptance(): void
 	{
+		// A day's wait for a verdict: the post outlasts the limit and is sent again after it.
+		$this->board->configure(array(settings::TIMEOUT_MIN => 1440));
 		$this->board->transport->refuse(429, 'limit_dobowy_klucza', 36000);
 		$until = time() + 36000;
 		$this->board->posting('Wpis po wyczerpaniu limitu dobowego.');
@@ -230,7 +232,9 @@ final class AcpControllerTest extends TestCase
 			self::assertStringNotContainsString($never, $message, 'never the key, the request or the gateway\'s body');
 		}
 
-		$this->board->posting('Wpis przyjęty po odnowieniu limitu.');
+		// The limit renews: the cron task sends the post again, and the gateway takes it.
+		$this->board->sweeper()->sweep($until + 1);
+		self::assertCount(2, $this->board->transport->requests);
 		$this->template = new MemoryTemplate();
 		$this->show(new FormRequest());
 
@@ -247,6 +251,32 @@ final class AcpControllerTest extends TestCase
 
 		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
 		self::assertSame($this->board->language->lang('MINOS_PAUSE_OVERLOAD', gmdate('H:i', $this->board->settings->pause(time())['until'])),
+			$this->template->vars['MINOS_PAUSE']);
+	}
+
+	/**
+	 * @return array<string,array{0:int,1:string,2:string}>
+	 */
+	public function shortPauses(): array
+	{
+		return array(
+			'the key\'s minute limit'  => array(429, 'limit_minutowy_klucza', 'MINOS_PAUSE_KEY'),
+			'an unavailable gateway'   => array(503, 'kolejka_niedostepna', 'MINOS_PAUSE_UNAVAILABLE'),
+		);
+	}
+
+	/**
+	 * @dataProvider shortPauses
+	 */
+	public function testAShortPauseIsShownWithItsHour(int $status, string $code, string $key): void
+	{
+		$this->board->transport->refuse($status, $code, 90);
+		$this->board->posting('Wpis w czasie przerwy.');
+
+		$this->show(new FormRequest());
+
+		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
+		self::assertSame($this->board->language->lang($key, gmdate('H:i', $this->board->settings->pause(time())['until'])),
 			$this->template->vars['MINOS_PAUSE']);
 	}
 

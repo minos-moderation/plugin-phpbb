@@ -25,7 +25,7 @@ The repository root is the extension root: phpBB loads it from `ext/minos/modera
 | `cron/sweeper.php` | Every 5 minutes: time-outs, retries, leftovers, pruning. |
 | `acp/`, `controller/acp.php`, `adm/style/` | The ACP page. |
 | `styles/all/template/event/` | The MCP note above a queued post. |
-| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`). |
+| `migrations/` | The table; the settings and the ACP module; the gateway's pause (`gateway_pause`, `shared_pause`). |
 | `language/pl/`, `language/en/` | Polish texts, identical in both (see "Language"). |
 | `bin/build-zip.sh`, `bin/package.php` | The installable package: the script installs the client from the lock, the packer decides what ships. |
 | `bin/phpbb-text-fixtures.php`, `tests/fixtures/phpbb-3.3/` | What phpBB's real text formatter makes of a corpus (see "Text fixtures"); never shipped. |
@@ -111,12 +111,20 @@ other change - a moderator's deletion, restoration or approval, an edit - supers
 - **A refusal that outlasts the wait is the failure mode at once** (the plugins' shared rule
   D9.3(a)): when `ponow_za_s`, taken as sent (not shortened to the retry cap), ends after a
   row's time-out, the row gets the failure mode (`timeout`, with the refusal's code) instead
-  of a retry no verdict could follow. A `429` with `limit_dobowy_klucza` (the key's daily
-  limit) or `limit_globalny_b2b` / `kolejka_pelna` (an overload) is remembered as the
-  gateway's pause (`settings::record_pause`, two `config` values from the `gateway_pause`
-  migration: the kind and until when), shown in the ACP with the hour, and forgotten at the
-  next `202`. Only the kind and the moment are stored: never the key or a body. The retry
-  schedule is otherwise unchanged; a shared pause of sending is a later item.
+  of a retry no verdict could follow.
+- **One refused request, not one per post: the shared pause of sending** (audit K-39). Every
+  `429` (the key's daily limit, its minute or in-flight limit, the shared ceiling, a full
+  queue, any other code), every `503` and no answer at all start the gateway's pause
+  (`settings::record_pause`: the kind, the code and until when - `ponow_za_s`, capped at a
+  day, or 60 s without it - in three `config` values from the `gateway_pause` and
+  `shared_pause` migrations). While it lasts `submitter::submit` sends nothing: a post from an
+  author's request stays `queued` for the cron task, and a run of the cron task stops before
+  its next batch (`hold_back`). A row whose time-out comes before the pause ends gets the
+  failure mode at once, with the pause's code (D9.3). Each refusal by the key's limits spends
+  its allowance (the contract: only a refusal the key did not cause is free), hence the pause.
+  A `500`, `502`, `504` or a `2xx` that is not the gateway's acceptance is retried per row
+  and pauses nothing. The ACP shows the pause with its kind and hour, never the key or a
+  body; the next `202` forgets it.
 - **Only a whole text is published on the gateway's word.** The gateway sees the first 3000
   characters; for a longer post `bezpieczne` is the failure mode, `ocenzurowane` holds,
   `zablokowane` still blocks. The row's `truncated` flag drives the notes in the MCP and ACP.
@@ -159,10 +167,10 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | Suite | What it proves |
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `NotificationTest`: every notification counted by kind. |
-| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the gateway's pause (daily limit, overload) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
+| `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, a non-gateway `2xx`, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
 | `tests/Posting` | Which posts are held (a link without text: the failure mode at once); edits; the MCP queue mark. |
-| `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval. |
+| `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
 | `tests/Acp` | Saving, validation, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board. |

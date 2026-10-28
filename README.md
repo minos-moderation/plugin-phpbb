@@ -67,7 +67,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
 1. Użytkownik wysyła nowy temat lub odpowiedź. Rozszerzenie kieruje post do kolejki do
    zatwierdzenia (autor widzi zwykły komunikat phpBB o poście czekającym na akceptację) i
-   od razu wysyła go do bramy.
+   od razu wysyła go do bramy — chyba że trwa przerwa w wysyłaniu po odmowie bramy (patrz
+   „Tryb awarii”): wtedy post wyśle zadanie cron.
 2. Brama przyjmuje post (`202`) i ocenia go w tle — dla kluczy darmowych nawet do 15 minut.
 3. Werdykt przychodzi na adres webhooka, podpisany sekretem. Rozszerzenie sprawdza podpis
    (niepodpisane, sfałszowane i przeterminowane doręczenia są odrzucane), odpowiada od razu
@@ -128,12 +129,17 @@ tryb awarii:
 Post zostawiony w kolejce przez tryb fail-closed również przyjmie spóźniony werdykt, o ile
 moderator nie zdążył go rozpatrzyć.
 
-Gdy brama jest przeciążona (`429`) lub chwilowo niedostępna (`503`, brak połączenia),
-rozszerzenie ponawia wysyłkę po czasie wskazanym przez bramę (albo po 1, 2, 4… minutach).
-Jeśli brama wskazuje czas późniejszy niż koniec oczekiwania na werdykt (np. po wyczerpaniu
-dziennego limitu klucza — do końca doby), post od razu obsługuje tryb awarii. Wyczerpany
-dzienny limit klucza i przeciążenie bramy widać na stronie ustawień jako komunikat z
-godziną, do której brama nie przyjmuje postów; znika po pierwszym przyjętym poście.
+Gdy brama odmawia z powodu limitów (`429`: limit klucza na minutę, na dobę lub zapytań w
+toku, wspólny limit wszystkich kluczy, pełna kolejka) albo jest chwilowo niedostępna (`503`,
+brak połączenia), rozszerzenie przestaje wysyłać posty do czasu wskazanego przez bramę (bez
+takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
+cron, a zadanie cron po pierwszej takiej odpowiedzi nie wysyła kolejnych paczek. Każda
+odmowa z powodu limitów klucza zużywa jego pulę zapytań, więc zamiast odmowy dla każdego
+postu jest jedna. Post, którego dotyczyła odmowa, jest ponawiany po czasie wskazanym przez
+bramę (albo po 1, 2, 4… minutach). Jeśli przerwa kończy się później niż czas oczekiwania na
+werdykt (np. po wyczerpaniu dziennego limitu klucza — do końca doby), post od razu obsługuje
+tryb awarii, bez wysyłania. Przerwę widać na stronie ustawień jako komunikat z powodem i
+godziną, do której rozszerzenie nie wysyła postów; znika po pierwszym przyjętym poście.
 Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, niedozwolony
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
@@ -193,7 +199,9 @@ podstawa do kary.
 ## Zadanie cron
 
 Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie nadszedł w
-czasie, ponawia wysyłki i usuwa własne wpisy 30 dni po rozstrzygnięciu. Na forach o małym
+czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
+„poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
+wpisy 30 dni po rozstrzygnięciu. Na forach o małym
 ruchu warto uruchamiać cron phpBB z systemu (`bin/phpbbcli.php cron:run`), bo cron
 wywoływany odsłonami stron może się opóźniać.
 
