@@ -15,7 +15,8 @@ use minos\moderation\service\settings;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
- * The ACP page "Minos": the settings, the webhook URL to register with the key, the last
+ * The ACP page "Minos": the settings, the webhook URL to register with the key, the
+ * gateway's pause (a spent daily limit, an overload) until its next acceptance, the last
  * refusal of the gateway, and the posts the extension handled lately.
  *
  * The key and the secret are write-only here: the form never carries them back, the page
@@ -127,6 +128,7 @@ class acp
 		}
 
 		$last_error = $this->settings->last_error();
+		$pause = $this->settings->pause(time());
 		$counts = $this->store->counts() + array_fill_keys(pending_store::UNSETTLED, 0) + array(pending_store::HELD => 0);
 		$waiting = $counts[pending_store::QUEUED] + $counts[pending_store::PENDING] + $counts[pending_store::RECEIVED];
 		$this->template->assign_vars(array(
@@ -143,6 +145,9 @@ class acp
 			'MINOS_TIMEOUT_MIN_MIN' => settings::MIN_TIMEOUT_MIN,
 			'MINOS_TIMEOUT_MIN_MAX' => settings::MAX_TIMEOUT_MIN,
 			'MINOS_WEBHOOK_URL'     => self::escape($this->webhook_url()),
+			'S_MINOS_PAUSE'         => $pause !== null,
+			'MINOS_PAUSE'           => ($pause !== null) ? self::escape($this->language->lang('MINOS_PAUSE_' . strtoupper($pause['kind']),
+				$this->user->format_date($pause['until'], 'H:i'))) : '',
 			'S_MINOS_LAST_ERROR'    => $last_error !== null,
 			'MINOS_LAST_ERROR'      => ($last_error !== null) ? self::escape($last_error['status'] . ' ' . $last_error['code']) : '',
 			'MINOS_LAST_ERROR_HELP' => ($last_error !== null) ? self::escape($this->error_help($last_error['code'])) : '',

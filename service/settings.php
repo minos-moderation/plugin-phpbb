@@ -53,6 +53,12 @@ class settings
 	/** One day. */
 	const MAX_TIMEOUT_MIN = 1440;
 
+	/** The gateway's pause: the key's daily limit is spent (`limit_dobowy_klucza`). */
+	const PAUSE_LIMIT = 'limit';
+
+	/** The gateway's pause: it is overloaded (`limit_globalny_b2b`, `kolejka_pelna`). */
+	const PAUSE_OVERLOAD = 'overload';
+
 	/** Characters of the key shown back to the administrator (`wgb2b_` and four more). */
 	const KEY_HINT_LENGTH = 10;
 
@@ -70,6 +76,8 @@ class settings
 	const LAST_ERROR = 'minos_moderation_last_error';
 	const LAST_ERROR_TIME = 'minos_moderation_last_error_time';
 	const LAST_SWEEP = 'minos_moderation_last_sweep';
+	const PAUSE_KIND = 'minos_moderation_pause_kind';
+	const PAUSE_UNTIL = 'minos_moderation_pause_until';
 
 	/** `config_text` keys. */
 	const API_KEY = 'minos_moderation_api_key';
@@ -284,6 +292,52 @@ class settings
 			return null;
 		}
 		return array('status' => (int) $m[1], 'code' => $m[2], 'time' => (int) $this->config[self::LAST_ERROR_TIME]);
+	}
+
+	/**
+	 * Remembers that the gateway accepts no post before a moment, for the ACP: the key's daily
+	 * limit is spent ({@see PAUSE_LIMIT}) or the gateway is overloaded ({@see PAUSE_OVERLOAD}).
+	 * Only the kind and the moment: never the key, a request or a response.
+	 *
+	 * @param string $kind  {@see PAUSE_LIMIT} or {@see PAUSE_OVERLOAD}.
+	 * @param int    $until Unix seconds.
+	 * @return void
+	 */
+	public function record_pause($kind, $until)
+	{
+		$this->config->set(self::PAUSE_KIND, ($kind === self::PAUSE_LIMIT) ? self::PAUSE_LIMIT : self::PAUSE_OVERLOAD);
+		$this->config->set(self::PAUSE_UNTIL, (int) $until, false);
+	}
+
+	/**
+	 * Forgets the gateway's pause: it accepted a post again.
+	 *
+	 * @return void
+	 */
+	public function clear_pause()
+	{
+		if ((string) $this->config[self::PAUSE_KIND] !== '' || (int) $this->config[self::PAUSE_UNTIL] !== 0)
+		{
+			$this->config->set(self::PAUSE_KIND, '');
+			$this->config->set(self::PAUSE_UNTIL, 0, false);
+		}
+	}
+
+	/**
+	 * The gateway's pause, while it lasts.
+	 *
+	 * @param int $now Unix seconds.
+	 * @return array{kind:string,until:int}|null Null when there is none, or it is over.
+	 */
+	public function pause($now)
+	{
+		$kind = (string) $this->config[self::PAUSE_KIND];
+		$until = (int) $this->config[self::PAUSE_UNTIL];
+		if ($until <= (int) $now || !in_array($kind, array(self::PAUSE_LIMIT, self::PAUSE_OVERLOAD), true))
+		{
+			return null;
+		}
+		return array('kind' => $kind, 'until' => $until);
 	}
 
 	/**

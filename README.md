@@ -126,6 +126,10 @@ moderator nie zdążył go rozpatrzyć.
 
 Gdy brama jest przeciążona (`429`) lub chwilowo niedostępna (`503`, brak połączenia),
 rozszerzenie ponawia wysyłkę po czasie wskazanym przez bramę (albo po 1, 2, 4… minutach).
+Jeśli brama wskazuje czas późniejszy niż koniec oczekiwania na werdykt (np. po wyczerpaniu
+dziennego limitu klucza — do końca doby), post od razu obsługuje tryb awarii. Wyczerpany
+dzienny limit klucza i przeciążenie bramy widać na stronie ustawień jako komunikat z
+godziną, do której brama nie przyjmuje postów; znika po pierwszym przyjętym poście.
 Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, niedozwolony
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.

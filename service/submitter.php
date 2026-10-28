@@ -26,7 +26,10 @@ use minos\moderation\platform\forum;
  *
  * - `202` whose `przyjete` names every item: the rows wait for their webhooks;
  * - `429`, `503`, another `5xx`, no answer at all, or an answer that is not the gateway's:
- *   the rows are retried after `blad.ponow_za_s`, or after a backoff doubling from 60 s;
+ *   the rows are retried after `blad.ponow_za_s`, or after a backoff doubling from 60 s -
+ *   unless `ponow_za_s` ends after a row's time-out: no verdict can come in time, so the
+ *   failure mode applies at once (the plugins' shared rule D9.3). A spent daily limit or an
+ *   overloaded gateway is also remembered for the ACP until the next `202`;
  * - any other refusal (`3xx`, `4xx`): a configuration error that retrying cannot fix. The
  *   failure mode applies, and the status and the code go to the error log and the ACP.
  */
@@ -52,6 +55,13 @@ class submitter
 
 	/** The prefix of every item id. */
 	const ID_PREFIX = 'phpbb:';
+
+	/** The gateway's refusals that pause it for the key ({@see settings::PAUSE_LIMIT}) or for all. */
+	const PAUSES = array(
+		'limit_dobowy_klucza' => settings::PAUSE_LIMIT,
+		'limit_globalny_b2b'  => settings::PAUSE_OVERLOAD,
+		'kolejka_pelna'       => settings::PAUSE_OVERLOAD,
+	);
 
 	/** Error labels of the extension's own (the gateway's codes are kept as sent). */
 	const ERROR_NETWORK = 'network';
@@ -250,6 +260,7 @@ class submitter
 		{
 			if ($this->all_accepted($items, $data))
 			{
+				$this->settings->clear_pause();
 				foreach ($batch as $entry)
 				{
 					$this->guarded((int) $entry['row']['post_id'], function () use ($entry, $now) {
@@ -264,6 +275,10 @@ class submitter
 		if ($status === 429 || $status >= 500)
 		{
 			$retry_after = (isset($error['ponow_za_s']) && is_int($error['ponow_za_s'])) ? $error['ponow_za_s'] : null;
+			if ($status === 429 && array_key_exists($code, self::PAUSES))
+			{
+				$this->settings->record_pause(self::PAUSES[$code], $now + (($retry_after !== null && $retry_after > 0) ? $retry_after : self::FIRST_BACKOFF_S));
+			}
 			$this->retry($batch, $retry_after, ($code !== '') ? $code : 'http_' . $status, $now);
 			return;
 		}
@@ -317,7 +332,9 @@ class submitter
 	}
 
 	/**
-	 * Schedules another attempt for every row of a batch.
+	 * Schedules another attempt for every row of a batch - or, for a row whose time-out comes
+	 * before the gateway's `ponow_za_s` (taken as sent, not shortened) ends, applies the
+	 * failure mode at once: the gateway will not take it in time.
 	 *
 	 * @param array<int,array{row:array<string,mixed>,md5:string,item:array<string,mixed>}> $batch       The items.
 	 * @param int|null                                                           $retry_after The gateway's `ponow_za_s`.
@@ -330,6 +347,14 @@ class submitter
 		foreach ($batch as $entry)
 		{
 			$row = $entry['row'];
+			if ($retry_after !== null && $retry_after > 0
+				&& $now + $retry_after > (int) $row['submitted_at'] + $this->settings->timeout_seconds())
+			{
+				$this->guarded((int) $row['post_id'], function () use ($row, $code, $now) {
+					return $this->applier->fail($row, pending_store::VERDICT_TIMEOUT, $code, $now);
+				});
+				continue;
+			}
 			if ($retry_after !== null && $retry_after > 0)
 			{
 				$pause = min(self::MAX_RETRY_AFTER_S, $retry_after);

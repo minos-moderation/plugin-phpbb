@@ -366,6 +366,85 @@ final class SubmitterTest extends TestCase
 		self::assertSame(pending_store::SUPERSEDED, $this->board->row($id)['status']);
 	}
 
+	/**
+	 * @return array<string,array{0:string,1:int,2:string}>
+	 */
+	public function failureModes(): array
+	{
+		return array(
+			'fail-closed' => array(settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD),
+			'fail-open'   => array(settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED),
+		);
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testASpentDailyLimitAppliesTheFailureModeAtOnceAndIsRemembered(string $mode, int $visibility, string $status): void
+	{
+		// Audit probes B R3/P4, the other way round: the post used to wait 20 minutes for a
+		// retry the gateway had already refused until the end of the day.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$this->gateway->refuse(429, 'limit_dobowy_klucza', 36000);
+		$now = time();
+
+		$id = $this->board->posting('Wpis po wyczerpaniu limitu dobowego.')['post_id'];
+
+		$row = $this->board->row($id);
+		self::assertSame(array($status, pending_store::VERDICT_TIMEOUT, 'limit_dobowy_klucza'), array($row['status'], $row['verdict'], $row['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+		$pause = $this->board->settings->pause($now);
+		self::assertSame(settings::PAUSE_LIMIT, $pause['kind']);
+		self::assertEqualsWithDelta($now + 36000, $pause['until'], 2, 'until the end of the refusal, as the gateway gave it');
+
+		$this->board->sweeper()->sweep($now + 19 * 60);
+		$this->board->sweeper()->sweep($now + 20 * 60 + 1);
+		self::assertCount(1, $this->gateway->requests, 'not retried after 19 minutes');
+		self::assertSame($status, $this->board->row($id)['status']);
+	}
+
+	/**
+	 * @return array<string,array{0:int,1:int,2:bool}>
+	 */
+	public function refusalsAgainstTheTimeout(): array
+	{
+		return array(
+			'ending before the time-out'       => array(20, 19 * 60, false),
+			'ending after the time-out'        => array(20, 20 * 60 + 1, true),
+			'longer than any retry pause, after a one-day time-out' => array(1440, submitter::MAX_RETRY_AFTER_S + 1, true),
+		);
+	}
+
+	/**
+	 * @dataProvider refusalsAgainstTheTimeout
+	 */
+	public function testARefusalEndingAfterThePostsTimeoutAppliesTheFailureModeAtOnce(int $timeout_min, int $retry_after, bool $at_once): void
+	{
+		$this->board->configure(array(settings::TIMEOUT_MIN => $timeout_min));
+		$this->gateway->refuse(503, 'kolejka_niedostepna', $retry_after);
+
+		$id = $this->board->posting('Zwykły testowy wpis.')['post_id'];
+
+		self::assertSame($at_once ? pending_store::HELD : pending_store::QUEUED, $this->board->row($id)['status']);
+		self::assertSame($at_once ? pending_store::VERDICT_TIMEOUT : '', $this->board->row($id)['verdict']);
+	}
+
+	public function testAnOverloadIsRememberedUntilTheGatewayAcceptsAgain(): void
+	{
+		$this->gateway->refuse(429, 'kolejka_pelna', 120);
+		$now = time();
+		$id = $this->board->posting('Wpis przy pełnej kolejce.')['post_id'];
+		self::assertSame(pending_store::QUEUED, $this->board->row($id)['status'], 'retried: the queue frees up before the time-out');
+		$pause = $this->board->settings->pause($now);
+		self::assertSame(settings::PAUSE_OVERLOAD, $pause['kind']);
+		self::assertEqualsWithDelta($now + 120, $pause['until'], 2);
+
+		$this->board->submitter->submit($this->board->store->due($now + 121, 10), $now + 121);
+
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertNull($this->board->settings->pause($now), 'the first 202 clears it');
+	}
+
 	public function testANewTopicIsSentWithItsTitleFirst(): void
 	{
 		// Audit probe B P1, the other way round: the title used to stay home, so an offensive

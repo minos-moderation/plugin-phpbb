@@ -15,6 +15,6 @@ class user
 
 	public function format_date($gmepoch, $format = false, $forcedate = false)
 	{
-		return gmdate('Y-m-d H:i', (int) $gmepoch);
+		return gmdate(($format !== false) ? (string) $format : 'Y-m-d H:i', (int) $gmepoch);
 	}
 }

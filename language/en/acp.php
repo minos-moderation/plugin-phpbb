@@ -60,6 +60,9 @@ $lang = array_merge($lang, array(
 	'MINOS_WEBHOOK'              => 'Adres webhooka',
 	'MINOS_WEBHOOK_EXPLAIN'      => 'Przekaż ten adres operatorowi bramy przy rejestracji klucza. Musi być publicznym adresem https:// w domenie forum; brama nie wysyła werdyktów na adresy IP ani przez przekierowania.',
 
+	'MINOS_PAUSE_LIMIT'          => 'Dzienny limit zapytań klucza jest wyczerpany do %s. Do tego czasu nowe posty trafiają do trybu awarii (fail-closed: czekają na moderatora; fail-open: są publikowane bez oceny).',
+	'MINOS_PAUSE_OVERLOAD'       => 'Brama jest przeciążona i nie przyjmuje postów do %s. Posty czekają i są wysyłane ponownie; post, którego brama nie przyjmie w czasie oczekiwania na werdykt, trafia do trybu awarii (fail-closed: czeka na moderatora; fail-open: jest publikowany bez oceny).',
+
 	'MINOS_LAST_ERROR'           => 'Ostatni błąd konfiguracji',
 	'MINOS_LAST_ERROR_EXPLAIN'   => 'Brama odrzuciła żądanie, a posty obsłużono zgodnie z trybem awarii. Wpis jest też w dzienniku błędów.',
 

@@ -211,6 +211,44 @@ final class AcpControllerTest extends TestCase
 		self::assertSame('Opublikowany bez oceny (fail-open)', $this->template->blocks['minos_rows'][0]['STATUS']);
 	}
 
+	public function testASpentDailyLimitIsShownWithItsHourUntilTheNextAcceptance(): void
+	{
+		$this->board->transport->refuse(429, 'limit_dobowy_klucza', 36000);
+		$until = time() + 36000;
+		$this->board->posting('Wpis po wyczerpaniu limitu dobowego.');
+
+		$this->show(new FormRequest());
+
+		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
+		$message = $this->template->vars['MINOS_PAUSE'];
+		self::assertStringContainsString('limit', $message);
+		self::assertTrue(strpos($message, gmdate('H:i', $until)) !== false || strpos($message, gmdate('H:i', $until + 1)) !== false,
+			'the hour the gateway accepts posts again');
+		foreach (array(Board::KEY, 'Odmowa (test).', 'Wpis po wyczerpaniu', '36000') as $never)
+		{
+			self::assertStringNotContainsString($never, $message, 'never the key, the request or the gateway\'s body');
+		}
+
+		$this->board->posting('Wpis przyjęty po odnowieniu limitu.');
+		$this->template = new MemoryTemplate();
+		$this->show(new FormRequest());
+
+		self::assertFalse($this->template->vars['S_MINOS_PAUSE'], 'the first 202 clears it');
+		self::assertSame('', $this->template->vars['MINOS_PAUSE']);
+	}
+
+	public function testAnOverloadedGatewayIsShownAsSuch(): void
+	{
+		$this->board->transport->refuse(429, 'limit_globalny_b2b', 600);
+		$this->board->posting('Wpis w godzinie przeciążenia.');
+
+		$this->show(new FormRequest());
+
+		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
+		self::assertSame($this->board->language->lang('MINOS_PAUSE_OVERLOAD', gmdate('H:i', $this->board->settings->pause(time())['until'])),
+			$this->template->vars['MINOS_PAUSE']);
+	}
+
 	/**
 	 * A complete, valid form with some fields replaced.
 	 *
