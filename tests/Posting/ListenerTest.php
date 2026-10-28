@@ -227,7 +227,8 @@ final class ListenerTest extends TestCase
 		// phpBB 3.3's real storage of each (tests/fixtures/phpbb-3.3/), in a reply under the
 		// default subject: no title either.
 		$cases = array();
-		foreach (array('image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'blank-bold') as $body)
+		foreach (array('image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'blank-bold',
+			'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp') as $body)
 		{
 			$cases[$body . ', fail-closed'] = array($body, settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD);
 			$cases[$body . ', fail-open'] = array($body, settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED);
@@ -249,6 +250,22 @@ final class ListenerTest extends TestCase
 		self::assertSame(array(), $this->gateway->requests, 'nothing to assess: no request');
 		$row = $this->board->row($id);
 		self::assertSame(array($status, 'empty_text'), array($row['status'], $row['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testATitleOverAnImageAndAnInvisibleCharacterIsNeverSentAlone(string $mode, int $visibility, string $status): void
+	{
+		// Review of S6c: a new topic of a title, an image and U+200B reached the gateway as
+		// the title and the one invisible character, and was published on its verdict.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+
+		$id = $this->board->posting('', 'post', array('xml' => self::stored('image-zwsp'), 'title' => 'Obraźliwy tytuł testowy'))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'a title is never sent alone');
+		self::assertSame(array($status, 'empty_text'), array($this->board->row($id)['status'], $this->board->row($id)['error_code']));
 		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
 	}
 

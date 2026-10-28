@@ -150,6 +150,19 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame(0, $this->queue_emails('Minos test safe'), 'a post held, then published: no e-mail about the queue');
 	}
 
+	public function test_an_image_and_an_invisible_character_send_nothing(): void
+	{
+		// Review of S6c: a new topic of a title, an image and U+200B reached the mock as the
+		// title alone, in effect, and was published on its verdict.
+		$this->configure();
+
+		$post_id = $this->post_as_author('Minos test invisible', "[img]https://example.org/a.png[/img]\u{200B}");
+
+		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
+		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'fail-closed: for a moderator');
+		$this->assertSame(array(), $this->mock_queue(), 'nothing sent, not the title alone');
+	}
+
 	public function test_a_masked_verdict_publishes_the_masked_text(): void
 	{
 		$this->configure();

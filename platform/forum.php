@@ -224,7 +224,7 @@ class forum
 				return str_repeat("\n", max(1, $lines));
 			}, $text);
 			// A title or alt goes with the text it sits beside, never alone (F7).
-			if (preg_replace('/[\s\p{Z}]+/u', '', $text) !== '')
+			if (!self::is_blank($text))
 			{
 				foreach ($attributes as $attribute)
 				{
@@ -233,8 +233,27 @@ class forum
 			}
 		}
 		$text = str_replace(array("\r\n", "\r"), "\n", $text);
+		if (self::is_blank($text))
+		{
+			// Only characters a reader does not see: no text to assess (F7).
+			return '';
+		}
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
 		return is_string($trimmed) ? $trimmed : trim($text);
+	}
+
+	/**
+	 * Whether a text holds nothing a reader sees: only white space, separators (`\p{Z}`) and
+	 * format characters (`\p{Cf}`: U+200B, U+00AD, U+2060, U+200E, U+FEFF, ...), which do not
+	 * make a text to assess (the plugins' shared rule F7). A text the pattern cannot read
+	 * (not UTF-8) is not blank: more text, never less.
+	 *
+	 * @param string $text A text.
+	 * @return bool
+	 */
+	public static function is_blank($text)
+	{
+		return preg_replace('/[\p{Cf}\p{Z}\s]+/u', '', (string) $text) === '';
 	}
 
 	/**
@@ -371,7 +390,7 @@ class forum
 	{
 		$text = $this->plain_text((string) $post['post_text']);
 		$poll = $this->poll_of($post);
-		if ($text === '' && $poll === '')
+		if (self::is_blank($text) && self::is_blank($poll))
 		{
 			return '';
 		}

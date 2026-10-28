@@ -67,6 +67,16 @@ $corpus = array(
 	'bare-link-only'       => 'https://example.org/a',
 	'attachment-inline'    => '[attachment=0]obrazek.png[/attachment]',
 	'flash'                => '[flash=200,100]https://example.org/a.swf[/flash]',
+	// Characters a reader does not see (\p{Cf}) beside an image, in a link's label, in bold.
+	'image-zwsp'           => "[img]https://example.org/a.png[/img]\u{200B}",
+	'image-shy'            => "[img]https://example.org/a.png[/img]\u{00AD}",
+	'image-word-joiner'    => "[img]https://example.org/a.png[/img]\u{2060}",
+	'image-lrm'            => "[img]https://example.org/a.png[/img]\u{200E}",
+	'link-label-shy'       => "[url=https://example.org/a]\u{00AD}[/url]",
+	'link-label-zwsp'      => "[url=https://example.org/a]\u{200B}[/url]",
+	'bold-zwsp'            => "[b]\u{200B}[/b]",
+	// The entity typed as text: phpBB shows it as typed, a visible text.
+	'typed-entity'         => '&#8203;',
 );
 
 define('IN_PHPBB', true);

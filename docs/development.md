@@ -96,7 +96,11 @@ decision).
   oceny" (`error_code` `empty_text`). Empty means nothing a reader reads: only an image
   (`IMG`, also `[img=WxH]`, which phpBB stores as an `IMG`), an inline attachment
   (`ATTACHMENT`), a video (`FLASH`), a link with a blank label (`<URL>` whose text is blank),
-  formatting around nothing, or a title alone (a new topic, a reply's own subject). Before
+  formatting around nothing, or a title alone (a new topic, a reply's own subject). Characters
+  a reader does not see count as nothing (`forum::is_blank`: white space, `\p{Z}` and the
+  format characters `\p{Cf}` - U+200B, U+00AD, U+2060, U+200E, ...), in the text, beside an
+  image, in a link's label and in a poll; a text the pattern cannot read (not UTF-8) is kept
+  and sent: more text, never less. The entity `&#8203;` typed as text stays visible text. Before
   F7 such a reply without a link or a title of its own was published unassessed, and an
   image went to the gateway as its address. A title is never sent alone; an address a reader
   sees (a bare one, `[url]X[/url]`) is text and is sent.

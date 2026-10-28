@@ -272,7 +272,9 @@ Post bez tekstu do oceny jest wstrzymywany jak każdy inny i od razu obsługuje 
 bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”.
 Tak jest z postem, którego czytelnik widzi tylko obrazek (`[img]`, także `[img=…]`, nawet z
 podpisem), załącznik, film albo link bez widocznego opisu (`[url=…] [/url]`), z samym
-formatowaniem wokół spacji (np. `[b] [/b]`) i z nowym tematem albo odpowiedzią z własnym
+formatowaniem wokół spacji (np. `[b] [/b]`), z samymi znakami niewidocznymi dla czytelnika
+(np. spacja o zerowej szerokości, miękki dywiz — także obok obrazka albo w opisie linku) i z
+nowym tematem albo odpowiedzią z własnym
 tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
 jest zwykłym tekstem: post zostaje wysłany i oceniony.
 
