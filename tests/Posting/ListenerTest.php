@@ -3,6 +3,7 @@
 namespace minos\moderation\tests\Posting;
 
 use minos\moderation\event\listener;
+use minos\moderation\event\webhook_access;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\tests\Fake\Board;
@@ -39,6 +40,8 @@ final class ListenerTest extends TestCase
 		{
 			self::assertTrue(method_exists(listener::class, $method), $method);
 		}
+		// And the webhook's way past a disabled board (tests/Receiver/WebhookAccessTest.php).
+		self::assertSame(array('core.user_setup'), array_keys(webhook_access::getSubscribedEvents()));
 	}
 
 	/**
@@ -219,15 +222,117 @@ final class ListenerTest extends TestCase
 		self::assertSame(array(), $this->gateway->requests);
 	}
 
-	public function testAReplyWithNothingToAssessIsNotHeld(): void
+	/**
+	 * @return array<string,array{0:string,1:string,2:int,3:string}>
+	 */
+	public function postsWithNothingToRead(): array
 	{
-		// No text, no link, no subject of its own (attachments only, or formatting around
-		// nothing, as phpBB 3.3 stores `[b] [/b]`): nothing a reader could see, nothing to hold.
-		$posted = $this->board->posting('', 'reply', array('xml' => self::stored('blank-bold'), 'topic_id' => $this->topic()));
+		// phpBB 3.3's real storage of each (tests/fixtures/phpbb-3.3/), in a reply under the
+		// default subject: no title either.
+		$cases = array();
+		foreach (array('image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'blank-bold',
+			'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp') as $body)
+		{
+			$cases[$body . ', fail-closed'] = array($body, settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD);
+			$cases[$body . ', fail-open'] = array($body, settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED);
+		}
+		return $cases;
+	}
 
-		self::assertSame(ITEM_APPROVED, $posted['visibility']);
-		self::assertNull($this->board->row($posted['post_id']));
-		self::assertSame(array(), $this->gateway->requests);
+	/**
+	 * @dataProvider postsWithNothingToRead
+	 */
+	public function testAPostWithoutTextAReaderReadsGoesToTheFailureModeUnsent(string $body, string $mode, int $visibility, string $status): void
+	{
+		// The plugins' shared rule F7: an image alone used to go to the gateway as its address,
+		// and a reply with only an attachment or formatting was published unassessed.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+
+		$id = $this->board->posting('', 'reply', array('xml' => self::stored($body), 'topic_id' => $this->topic()))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'nothing to assess: no request');
+		$row = $this->board->row($id);
+		self::assertSame(array($status, 'empty_text'), array($row['status'], $row['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testATitleOverAnImageAndAnInvisibleCharacterIsNeverSentAlone(string $mode, int $visibility, string $status): void
+	{
+		// Review of S6c: a new topic of a title, an image and U+200B reached the gateway as
+		// the title and the one invisible character, and was published on its verdict.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+
+		$id = $this->board->posting('', 'post', array('xml' => self::stored('image-zwsp'), 'title' => 'Obraźliwy tytuł testowy'))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'a title is never sent alone');
+		self::assertSame(array($status, 'empty_text'), array($this->board->row($id)['status'], $this->board->row($id)['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function addressesAReaderSees(): array
+	{
+		return array('a bare address' => array('bare-link-only'), 'a [url] address' => array('url-tag'));
+	}
+
+	/**
+	 * @dataProvider addressesAReaderSees
+	 */
+	public function testAnAddressAReaderSeesIsTextAndIsSentWithItsLink(string $body): void
+	{
+		$id = $this->board->posting('', 'reply', array('xml' => self::stored($body), 'topic_id' => $this->topic()))['post_id'];
+
+		self::assertCount(1, $this->gateway->requests);
+		$item = $this->gateway->items(0)[0];
+		self::assertSame('phpbb:' . $id, $item['id']);
+		self::assertSame('https://example.org/a', $item['tekst']);
+		self::assertSame(array(1, array('example.org')), array($item['meta']['links'], $item['meta']['link_domains']));
+	}
+
+	public function testAnImageBesideTextSendsTheTextWithoutTheImagesAddress(): void
+	{
+		$this->board->posting('', 'reply', array('xml' => self::stored('image'), 'topic_id' => $this->topic()));
+
+		$sent = $this->gateway->items(0)[0]['tekst'];
+		self::assertStringContainsString('Obrazek', $sent);
+		self::assertStringContainsString('koniec', $sent);
+		self::assertStringNotContainsString('a.png', $sent, 'the reader sees the image, not its address');
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function imageTitles(): array
+	{
+		// phpBB's own [img] carries none; a board's custom BBCode may (an XML of that shape).
+		return array(
+			'alone'       => array('<r><IMG src="https://example.org/a.png" title="Podpis obrazka testowego"><s>[img]</s>https://example.org/a.png<e>[/img]</e></IMG></r>', ''),
+			'beside text' => array('<r>Tekst testowy <IMG src="https://example.org/a.png" alt="Podpis obrazka testowego"><s>[img]</s>https://example.org/a.png<e>[/img]</e></IMG></r>',
+				'Podpis obrazka testowego'),
+		);
+	}
+
+	/**
+	 * @dataProvider imageTitles
+	 */
+	public function testAnImagesTitleIsSentBesideTextAndNeverMakesATextAlone(string $xml, string $sent): void
+	{
+		$this->board->posting('', 'reply', array('xml' => $xml, 'topic_id' => $this->topic()));
+
+		if ($sent === '')
+		{
+			self::assertSame(array(), $this->gateway->requests, 'an image with a title is still an image alone');
+			return;
+		}
+		$text = $this->gateway->items(0)[0]['tekst'];
+		self::assertStringStartsWith('Tekst testowy', $text);
+		self::assertStringContainsString($sent, $text, 'the title a reader sees beside the text');
+		self::assertStringNotContainsString('a.png', $text);
 	}
 
 	/**

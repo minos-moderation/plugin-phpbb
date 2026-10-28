@@ -142,6 +142,63 @@ final class MockGatewayTest extends TestCase
 		self::assertSame(array(401), $statuses['phpbb:' . $posts['forged']]);
 	}
 
+	public function testOnlyTheMocksAcceptanceAcceptsAPostOverHttp(): void
+	{
+		// The plugins' shared rule D9.6 (F5a), over HTTP with the real cURL transport: a 200
+		// naming the post in `przyjete` and then a 408 at the gateway's address are retried
+		// (and pause the sending), never taken as an acceptance or a configuration error; once
+		// the address is the mock's, its 202 accepts the post and its verdict is applied.
+		$database = $this->dir . '/board.sqlite';
+		$board = Board::open($database, new curl_transport());
+		$forum_port = $this->serve(array(PHP_BINARY, '-S', '127.0.0.1:%d', __DIR__ . '/forum_router.php'), array(
+			'MINOS_E2E_DB'     => $database,
+			'MINOS_E2E_SECRET' => Config::DEFAULT_SECRET,
+			'MINOS_E2E_LOG'    => $this->dir . '/deliveries.jsonl',
+		));
+		$this->env = array(
+			'MINOS_MOCK_WEBHOOK_URL' => "http://127.0.0.1:{$forum_port}/minos/webhook",
+			'MINOS_MOCK_DATA_DIR'    => $this->dir,
+			'MINOS_MOCK_DELAY_S'     => '0',
+		);
+		$mock_port = $this->serve(array(PHP_BINARY, '-S', '127.0.0.1:%d', '-t', self::MOCK . '/public'), $this->env);
+		$foreign_port = $this->serve(array(PHP_BINARY, '-S', '127.0.0.1:%d', __DIR__ . '/foreign_router.php'), array(
+			'MINOS_E2E_STATUSES' => '200,408',
+			'MINOS_E2E_COUNT'    => $this->dir . '/foreign.count',
+		));
+		$board->configure(array(settings::GATEWAY_URL => "http://127.0.0.1:{$foreign_port}"), array(
+			settings::API_KEY        => Config::DEFAULT_KEY,
+			settings::WEBHOOK_SECRET => Config::DEFAULT_SECRET,
+		));
+		$now = time();
+
+		$id = $board->posting('Testowy wpis wysłany pod zły adres.')['post_id'];
+
+		$row = $board->row($id);
+		self::assertSame(array(pending_store::QUEUED, 'http_200'), array($row['status'], $row['error_code']), 'a 200 is no acceptance');
+		self::assertSame(settings::PAUSE_FOREIGN, $board->settings->pause($now)['kind']);
+		self::assertNull($board->settings->last_error(), 'nor a configuration error');
+
+		$board->sweeper()->sweep($now + 61);
+		$row = $board->row($id);
+		self::assertSame(array(pending_store::QUEUED, 'http_408', '2'), array($row['status'], $row['error_code'], $row['attempts']), 'a 408 is retried');
+		self::assertSame(settings::PAUSE_UNAVAILABLE, $board->settings->pause($now + 61)['kind']);
+		self::assertSame('2', (string) file_get_contents($this->dir . '/foreign.count'));
+
+		// The administrator corrects the address; saving the ACP form ends the pause.
+		$board->configure(array(settings::GATEWAY_URL => "http://127.0.0.1:{$mock_port}"), array(
+			settings::API_KEY        => Config::DEFAULT_KEY,
+			settings::WEBHOOK_SECRET => Config::DEFAULT_SECRET,
+		));
+		$board->settings->clear_pause();
+		$board->sweeper()->sweep($now + 61 + 121);
+		self::assertSame(pending_store::PENDING, $board->row($id)['status'], 'the mock\'s 202 accepts it');
+
+		$this->work();
+
+		self::assertSame(pending_store::PUBLISHED, $board->row($id)['status']);
+		self::assertSame(ITEM_APPROVED, (int) $board->post($id)['post_visibility']);
+	}
+
 	/**
 	 * One pass of the mock's worker, as a process.
 	 */

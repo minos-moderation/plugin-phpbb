@@ -13,10 +13,11 @@ namespace minos\moderation;
 /**
  * Loads the bundled Minos PHP client (`Minos\Client`) from the extension's own `vendor/`.
  *
- * phpBB autoloads the extension's own classes, but not a Composer tree shipped inside it.
- * Requiring the bundled `vendor/autoload.php` would register a second Composer class loader
- * next to phpBB's own, and two copies of `Composer\Autoload\ClassLoader` of different
- * versions do not mix. This maps the one namespace the extension needs onto its files.
+ * phpBB autoloads the extension's own classes, and requires its `vendor/autoload.php` when
+ * there is one (`\phpbb\di\container_builder`, seen on a live board). The package ships none
+ * (`bin/package.php`): it would register a second Composer class loader next to phpBB's own,
+ * and two copies of `Composer\Autoload\ClassLoader` of different versions do not mix. This
+ * maps the one namespace the extension needs onto its files.
  */
 class client_loader
 {

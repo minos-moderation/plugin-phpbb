@@ -25,7 +25,12 @@ class manager
 	/** @var array<int,array{0:string,1:string,2:int}> [action, type, post or topic id]. */
 	public $calls = array();
 
-	/** @var array<int,array<int,string>> Who phpBB finds to notify (a moderator), and by which methods. */
+	/**
+	 * @var array<int,array<int,string>> Who phpBB finds to notify (a moderator), and by which
+	 *     methods: one who chose the e-mail as well, in the UCP option of the queue
+	 *     notifications (`notification.type.needs_approval`; phpBB's default is the board
+	 *     only). The live board's suite (tests/functional) checks the same with phpBB.
+	 */
 	public $recipients = array(5 => array(self::BOARD, self::EMAIL));
 
 	/** @var callable|null The listener of `core.notification_manager_add_notifications`. */

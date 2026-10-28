@@ -82,6 +82,17 @@ klucza, na przykład:
 Brama wysyła werdykty tylko na adres `https://` z nazwą domeny (nigdy na adres IP), tylko do
 hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
+Gdy webhook odrzuca doręczenia z nieprawidłowym podpisem, strona ustawień mówi, ile ich było
+od ostatniego przyjętego doręczenia, kiedy przyszło ostatnie i dlaczego zostało odrzucone:
+podpis nie pasuje do zapisanego sekretu (sprawdź sekret), czas podpisu różni się od zegara
+serwera forum o ponad 5 minut (sprawdź zegar serwera) albo doręczenie nie miało poprawnego
+nagłówka podpisu (np. usuwa go serwer pośredniczący). Dzięki temu zły sekret albo
+rozregulowany zegar widać bez przeglądania dzienników. Brama zawsze dostaje tę samą odpowiedź
+`401`, bez powodu; sekretu, nagłówka ani treści doręczenia rozszerzenie nigdzie nie zapisuje.
+Komunikat znika po pierwszym doręczeniu z poprawnym podpisem albo po zapisaniu nowego
+sekretu. Doręczenie z nieprawidłowym podpisem może wysłać każdy, kto zna adres webhooka, więc
+pojedynczy komunikat nie musi oznaczać błędu ustawień.
+
 ## Jak to działa
 
 1. Użytkownik wysyła nowy temat lub odpowiedź. Rozszerzenie kieruje post do kolejki do
@@ -128,7 +139,8 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    powiadomienie znika z listy, a e-mail nie wychodzi wcale. Gdy zostawi post w kolejce dla
    moderatora (werdykt, tryb awarii fail-closed, brak tekstu do oceny, post zmieniony w
    czasie oceny), moderatorzy dostają to powiadomienie jeszcze raz, tym razem także e-mailem
-   (jeśli mają je włączone) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
+   (jeśli mają je włączone; phpBB domyślnie powiadamia o postach czekających na zatwierdzenie
+   tylko na forum, e-mail moderator włącza w ustawieniach powiadomień w panelu użytkownika) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
    spóźniony werdykt, poprawka), powiadomienie zostaje na liście, a drugi e-mail nie wychodzi. O postach, których rozszerzenie nie wstrzymuje,
    phpBB powiadamia jak zwykle. Jeśli wyłączysz ocenianie w ustawieniach, gdy posty czekają
    na werdykt, moderatorzy dostają wtedy e-mail o każdym z nich (od tej chwili decydują o
@@ -145,9 +157,8 @@ werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
 werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
-oceniła tylko początek długiego postu, post ma link albo tytuł, ale nie ma tekstu do oceny,
-albo
-ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
+oceniła tylko początek długiego postu, post nie ma tekstu do oceny (np. sam obrazek,
+załącznik, link bez widocznego opisu albo sam tytuł) albo ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
 tryb awarii:
 
 - **fail-closed** (domyślnie): post zostaje w kolejce do zatwierdzenia i czeka na
@@ -171,8 +182,10 @@ nie jest oceniana (patrz „Ograniczenia”).
 
 Gdy brama odmawia z powodu limitów (`429`: limit klucza na minutę, na dobę lub zapytań w
 toku, wspólny limit wszystkich kluczy, pełna kolejka) albo jest chwilowo niedostępna (`503`,
-brak połączenia), rozszerzenie przestaje wysyłać posty do czasu wskazanego przez bramę (bez
-takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
+`408`, brak połączenia), a także gdy pod adresem bramy odpowiada coś innego niż brama
+(odpowiedź `2xx` inna niż `202`, np. strona logowania serwera pośredniczącego — wtedy
+komunikat radzi sprawdzić adres bramy), rozszerzenie przestaje wysyłać posty do czasu
+wskazanego przez bramę (bez takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
 cron, a zadanie cron po pierwszej takiej odpowiedzi nie wysyła kolejnych paczek. Każda
 odmowa z powodu limitów klucza zużywa jego pulę zapytań, więc zamiast odmowy dla każdego
 postu jest jedna. Post, którego dotyczyła odmowa, jest ponawiany po czasie wskazanym przez
@@ -187,11 +200,13 @@ Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, 
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
 
-Dokładnie: ponawiane są odpowiedź `429` (z każdym kodem), każda odpowiedź `5xx`, brak
-odpowiedzi (błąd połączenia albo przekroczone 10 sekund) i odpowiedź `2xx`, która nie
-przyjmuje każdego wysłanego postu (brak go w polu `przyjete`, także odpowiedź `2xx` spoza
-bramy, np. strona logowania serwera pośredniczącego). Każda inna odpowiedź — `3xx` (np.
-przekierowanie) i `4xx` inne niż `429`, także `408` — jest traktowana jak błąd konfiguracji.
+Dokładnie: post przyjmuje wyłącznie odpowiedź `202`, i to tylko wtedy, gdy wymienia go w
+polu `przyjete` (post, którego tam brak, jest ponawiany). Ponawiane są też odpowiedź `429` (z
+każdym kodem), `408` (liczona jak brak odpowiedzi), każda odpowiedź `5xx`, brak odpowiedzi
+(błąd połączenia albo przekroczone 10 sekund) i każda odpowiedź `2xx` inna niż `202` —
+nawet taka, która wymienia post w polu `przyjete` — bo to nie jest przyjęcie przez bramę.
+Każda inna odpowiedź — `3xx` (np. przekierowanie) i `4xx` inne niż `408` i `429` — jest
+traktowana jak błąd konfiguracji.
 Gdy błąd dotyczy jednego postu z paczki (pole `element`), tryb awarii obsługuje tylko ten
 post, a pozostałe są wysyłane ponownie bez niego.
 
@@ -213,7 +228,10 @@ Do bramy trafia wyłącznie:
 - tekst postu: **pierwsze 3000 znaków**, razem z cytatami — każdy poprzedzony wierszem
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
-  `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
+  `title` i `alt` (tam też można ukryć słowa), wysyłanym tylko obok innego tekstu. Adres
+  linku widoczny dla czytelnika (wklejony adres, `[url]adres[/url]`) jest tekstem i trafia do
+  bramy; adres obrazka (`[img]`), nazwa pliku wstawionego załącznika i adres filmu
+  (`[flash]`) nie — czytelnik widzi obrazek, plik albo film, a brama nie ocenia obrazów. Pierwszy post nowego tematu jest poprzedzony
   tytułem tematu i pustym wierszem, a jeśli temat ma ankietę — także jej pytaniem i
   opcjami (każda w osobnym wierszu) i pustym wierszem (tytuł i ankieta mieszczą się w tych
   3000 znakach); odpowiedź — własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam
@@ -245,17 +263,20 @@ przekierowaniem.
   moderator ocenia je bez pomocy Minosa;
 - postów użytkowników spoza grup wybranych w ustawieniu „Grupy użytkowników”;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
-  załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z
-  linkiem albo z tytułem (każdy nowy temat, odpowiedź z własnym tematem), ale bez tekstu do
-  oceny — także z samym formatowaniem wokół spacji, np. `[b] [/b]`, albo z linkiem o pustym,
-  niewidocznym opisie — jest wstrzymywany i od razu obsługuje go tryb awarii, bez wysyłania
-  czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”. Sam tytuł
-  nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
 - wszystkich postów, gdy ocenianie jest wyłączone (gdy jest włączone, ale brakuje klucza,
   sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
   awarii).
+
+Post bez tekstu do oceny jest wstrzymywany jak każdy inny i od razu obsługuje go tryb awarii,
+bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”.
+Tak jest z postem, którego czytelnik widzi tylko obrazek (`[img]`, także `[img=…]`, nawet z
+podpisem), załącznik, film albo link bez widocznego opisu (`[url=…] [/url]`), z samym
+formatowaniem wokół spacji (np. `[b] [/b]`), z samymi znakami niewidocznymi dla czytelnika
+(np. spacja o zerowej szerokości, miękki dywiz — także obok obrazka albo w opisie linku) i z
+nowym tematem albo odpowiedzią z własnym
+tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
+jest zwykłym tekstem: post zostaje wysłany i oceniony.
 
 ## Czas do werdyktu i liczba werdyktów
 
@@ -301,6 +322,24 @@ włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wrac
 postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
+**Wyłączenie forum** (w panelu administracji „Wyłącz forum”, a także forum wyłączone przez
+phpBB po przekroczeniu limitu obciążenia) nie zatrzymuje oceniania: otwarte zostaje wyłącznie
+doręczenie werdyktu, czyli żądanie `POST` do `app.php/minos/webhook` (przy przyjaznych adresach
+URL: `/minos/webhook`); każde inne żądanie — także do innego skryptu forum z tą samą końcówką
+adresu, np. `viewtopic.php/minos/webhook` — dostaje stronę „forum wyłączone”, więc werdykty
+przychodzą i są stosowane jak decyzje moderatora, a czytelnicy zobaczą ich skutek po ponownym
+włączeniu forum. Bez tego phpBB odpowiadałby na doręczenie stroną „forum wyłączone” z kodem
+`200`, brama uznałaby werdykt za doręczony, a werdykt by przepadł. Sprawdza to test na
+prawdziwym forum phpBB 3.3 (zadanie `phpbb-functional` w CI).
+
+Wyjątek: w czasie **aktualizacji phpBB** (katalog `install/` na serwerze) phpBB odpowiada na
+każde żądanie, także na doręczenie werdyktu, stroną „forum wyłączone” z kodem `200`, zanim
+rozszerzenie je zobaczy. Brama uznaje wtedy werdykt za doręczony i go nie ponawia: werdykt
+przepada, a post czeka do końca czasu oczekiwania i obsługuje go tryb awarii (fail-closed:
+zostaje w kolejce dla moderatora). Na czas aktualizacji phpBB wyłącz ocenianie w ustawieniach
+rozszerzenia: webhook odpowiada wtedy `404`, brama ponawia doręczenie, a po ponownym włączeniu
+oceniania czekające posty są oceniane od nowa.
+
 ## Usunięcie rozszerzenia
 
 Wyłączenie rozszerzenia w menedżerze rozszerzeń (**Wyłącz**) zostawia jego dane: patrz
@@ -309,8 +348,8 @@ tabelę (`minos_pending` — z zapisanymi werdyktami i oryginałami zamaskowanyc
 ustawienia (także klucz i sekret webhooka) i stronę w panelu administracji. Posty, które
 czekały w kolejce, zostają w kolejce phpBB dla moderatorów; posty opublikowane z maskowaniem
 zostają zamaskowane, a ich oryginałów nie da się już odzyskać z rozszerzenia. Wpisy w
-dzienniku moderatorów zostają. Na żywym forum phpBB nie zostało to jeszcze sprawdzone
-testem (opis wynika z migracji rozszerzenia i z kodu phpBB 3.3).
+dzienniku moderatorów zostają. Sprawdza to test na żywym forum phpBB 3.3 (zadanie
+`phpbb-functional` w CI, opis w `docs/development.md`, „The live board”).
 
 ## Ograniczenia
 

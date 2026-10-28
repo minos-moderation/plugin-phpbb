@@ -17,7 +17,9 @@ final class RealFormatterFixtureTest extends TestCase
 	private const DIR = __DIR__ . '/../fixtures/phpbb-3.3';
 
 	/** The corpus the fixtures must cover. */
-	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies');
+	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies',
+		'image', 'image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'url-tag', 'bare-link-only',
+		'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp', 'typed-entity');
 
 	/**
 	 * @return array<string,array{0:array<string,string>}>
@@ -86,7 +88,26 @@ final class RealFormatterFixtureTest extends TestCase
 			'size'                 => array('size', 'rozmiarowy'),
 			'underline and italics' => array('underline-italic', 'podkreślone'),
 			'smilies'              => array('smilies', 'Wesoło :) i bardzo :D koniec'),
-			'an image'             => array('image', 'Obrazek https://example.org/a.png koniec'),
+			// The plugins' shared rule F7: an image, an attachment or a video is no text, a
+			// link's address is text only where the reader sees it.
+			'an image beside text' => array('image', 'Obrazek  koniec'),
+			'an image alone'       => array('image-only', ''),
+			'an image with a size' => array('image-with-size', ''),
+			'an inline attachment' => array('attachment-inline', ''),
+			'a video'              => array('flash', ''),
+			'a link, blank label'  => array('link-blank-label', ''),
+			'a link, no label'     => array('link-empty-label', ''),
+			'a [url] address'      => array('url-tag', 'https://example.org/a'),
+			'a bare address alone' => array('bare-link-only', 'https://example.org/a'),
+			// Characters a reader does not see are no text either (F7, \p{Cf}).
+			'an image and U+200B'  => array('image-zwsp', ''),
+			'an image and U+00AD'  => array('image-shy', ''),
+			'an image and U+2060'  => array('image-word-joiner', ''),
+			'an image and U+200E'  => array('image-lrm', ''),
+			'a link labelled U+00AD' => array('link-label-shy', ''),
+			'a link labelled U+200B' => array('link-label-zwsp', ''),
+			'bold around U+200B'   => array('bold-zwsp', ''),
+			'the entity typed'     => array('typed-entity', '&#8203;'),
 			'plain lines'          => array('plain-lines', "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""),
 			'bold around a blank'  => array('blank-bold', ''),
 			'empty italics'        => array('empty-italic', ''),
@@ -126,6 +147,15 @@ final class RealFormatterFixtureTest extends TestCase
 
 		self::assertStringContainsString('zak[b:1a2b3c4d]a[/b:1a2b3c4d]zane', $text);
 		self::assertStringStartsWith('Stary', $text);
+	}
+
+	public function testATextThePatternCannotReadIsNeverTakenForBlank(): void
+	{
+		// Not UTF-8 (phpBB 3.0's storage could hold anything): the blank check cannot read it,
+		// and the text is kept - more text, never less.
+		$text = Board::open()->forum->plain_text("\xff\xfe");
+
+		self::assertSame("\xff\xfe", $text);
 	}
 
 	public function testAStoredTextWithADocumentTypeIsNotReadAsPhpbbsXml(): void

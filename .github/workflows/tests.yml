@@ -64,3 +64,72 @@ jobs:
           version="$(php -r "echo json_decode(file_get_contents('composer.json'), true)['version'];")"
           archive="$(bash bin/build-zip.sh | tail -n 1)"
           bash .github/scripts/check-release-archive.sh "$archive" "v$version"
+
+  # The extension on a live phpBB 3.3 board (audit K-45): phpBB's own functional test
+  # harness (phpbb_functional_test_case) at the commit of the stubs and the text fixtures
+  # (bin/phpbb-checkout.sh), the board on MySQL 8.0 and PHP's built-in server, the extension
+  # installed from its own package, and the mock gateway of client-php as real processes.
+  # The key and the secret are invented test values (tests/functional/moderation_test.php).
+  phpbb-functional:
+    name: Live phpBB board (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.3']
+    env:
+      # phpBB's harness reads these (tests/test_framework/phpbb_test_case_helpers.php).
+      PHPBB_TEST_DBMS: phpbb\db\driver\mysqli
+      PHPBB_TEST_DBHOST: 127.0.0.1
+      PHPBB_TEST_DBPORT: '3306'
+      PHPBB_TEST_DBNAME: phpbb_tests
+      PHPBB_TEST_DBUSER: phpbb
+      PHPBB_TEST_DBPASSWD: phpbb-tylko-test
+      PHPBB_TEST_TABLE_PREFIX: phpbb_
+      PHPBB_FUNCTIONAL_URL: http://127.0.0.1:8080/
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, dom, gd, iconv, intl, json, mbstring, mysqli, pdo, pdo_mysql, xml, zip
+          coverage: none
+      - name: The database (the runner's MySQL 8.0)
+        run: |
+          sudo systemctl start mysql.service
+          mysql -h 127.0.0.1 -uroot -proot -e "CREATE DATABASE phpbb_tests"
+          mysql -h 127.0.0.1 -uroot -proot -e "CREATE USER 'phpbb'@'%' IDENTIFIED WITH mysql_native_password BY '$PHPBB_TEST_DBPASSWD'" \
+            || mysql -h 127.0.0.1 -uroot -proot -e "CREATE USER 'phpbb'@'%' IDENTIFIED BY '$PHPBB_TEST_DBPASSWD'"
+          mysql -h 127.0.0.1 -uroot -proot -e "GRANT ALL ON *.* TO 'phpbb'@'%'"
+      # The token goes to the two steps that run Composer, never to the board or the tests.
+      - name: phpBB 3.3.x and its test harness
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
+        run: bash bin/phpbb-checkout.sh "$RUNNER_TEMP/phpbb" --tests
+      - name: The extension, from its package, with the functional tests beside it
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
+        run: |
+          composer install --no-dev --no-interaction --no-progress --prefer-dist
+          archive="$(bash bin/build-zip.sh | tail -n 1)"
+          unzip -q "$archive" -d "$RUNNER_TEMP/phpbb/phpBB/ext/"
+          mkdir -p "$RUNNER_TEMP/phpbb/phpBB/ext/minos/moderation/tests"
+          cp -R tests/functional "$RUNNER_TEMP/phpbb/phpBB/ext/minos/moderation/tests/"
+          cp phpunit.functional.xml.dist "$RUNNER_TEMP/phpbb/phpBB/ext/minos/moderation/"
+      - name: The board's web server
+        working-directory: ${{ runner.temp }}/phpbb
+        run: |
+          PHP_CLI_SERVER_WORKERS=4 nohup php -S 127.0.0.1:8080 -t phpBB > "$RUNNER_TEMP/board.log" 2>&1 &
+          for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:8080/ && exit 0; sleep 0.2; done
+          exit 1
+      - name: The functional suite
+        working-directory: ${{ runner.temp }}/phpbb
+        env:
+          MINOS_MOCK_PATH: ${{ github.workspace }}/vendor/minos-moderation/client-php/mock-gateway
+        run: phpBB/vendor/bin/phpunit -c phpBB/ext/minos/moderation/phpunit.functional.xml.dist
+      - name: The board's server log
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/board.log"

@@ -20,9 +20,13 @@ use Minos\Client\WebhookPayload;
  * 0. with the extension switched off, `404`: it does nothing, and the gateway retries until
  *    its TTL while the held posts wait in phpBB's queue for a moderator;
  * 1. the raw body, as it arrived;
- * 2. the signature (`Signature::verify` of the bundled client): `401` when it fails, so the
- *    gateway retries. Without a usable stored secret every delivery is refused: an HMAC keyed
- *    with an empty string is one anybody can compute;
+ * 2. the signature (`Signature::check` of the bundled client, which is `Signature::verify`
+ *    with the reason): `401` when it fails, so the gateway retries, the same answer whatever
+ *    the reason. The reason (a malformed header, a stale timestamp, a MAC that does not match)
+ *    is counted for the ACP ({@see settings::record_rejection}), never the header, the body
+ *    or the secret, so an administrator sees a wrong secret or a drifting clock without a
+ *    log; a delivery that passes forgets the count. Without a usable stored secret every
+ *    delivery is refused: an HMAC keyed with an empty string is one anybody can compute;
  * 3. the payload (`WebhookPayload::parse`): `400` when it is not one; an id this forum does not
  *    wait for (unknown, of an earlier revision, or already handled) gets `200` and nothing
  *    else, because deliveries repeat;
@@ -66,10 +70,17 @@ class receiver
 			return array(404, null);
 		}
 		$secret = $this->settings->webhook_secret();
-		if (!settings::valid_secret($secret) || !Signature::verify($secret, (string) $signature, (string) $body, (int) $now))
+		if (!settings::valid_secret($secret))
 		{
 			return array(401, null);
 		}
+		$check = Signature::check($secret, (string) $signature, (string) $body, (int) $now);
+		if ($check !== Signature::OK)
+		{
+			$this->settings->record_rejection($check, (int) $now);
+			return array(401, null);
+		}
+		$this->settings->forget_rejections();
 
 		$payload = WebhookPayload::parse((string) $body);
 		if ($payload === null)

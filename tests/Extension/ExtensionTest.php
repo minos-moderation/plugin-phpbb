@@ -9,6 +9,7 @@ use minos\moderation\migrations\install_data;
 use minos\moderation\migrations\install_schema;
 use minos\moderation\migrations\queue_notice;
 use minos\moderation\migrations\shared_pause;
+use minos\moderation\migrations\signature_trace;
 use minos\moderation\migrations\user_groups;
 use minos\moderation\migrations\verdict_times;
 use minos\moderation\service\settings;
@@ -59,8 +60,9 @@ final class ExtensionTest extends TestCase
 		$pause = new gateway_pause($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$shared_pause = new shared_pause($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$groups = new user_groups($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		$trace = new signature_trace($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$modules = 0;
-		foreach (array_merge($migration->update_data(), $pause->update_data(), $shared_pause->update_data(), $groups->update_data()) as $step)
+		foreach (array_merge($migration->update_data(), $pause->update_data(), $shared_pause->update_data(), $groups->update_data(), $trace->update_data()) as $step)
 		{
 			list($tool, $arguments) = $step;
 			if ($tool === 'config.add')
@@ -92,6 +94,11 @@ final class ExtensionTest extends TestCase
 		self::assertSame(array('\minos\moderation\migrations\user_groups'), verdict_times::depends_on());
 		self::assertSame(array('\minos\moderation\migrations\verdict_times'), queue_notice::depends_on());
 		self::assertNull($settings->pause(time()), 'no pause of the gateway yet');
+		self::assertNull($settings->rejections(), 'no refused signature yet');
+		self::assertTrue($trace->effectively_installed());
+		self::assertSame(array('\minos\moderation\migrations\queue_notice'), signature_trace::depends_on());
+		self::assertSame(array(array('config.add', array(settings::SIGNATURE_REJECTED, '', true))), $trace->update_data(),
+			'dynamic: a refused delivery writes it, and must not empty phpBB\'s config cache');
 		self::assertTrue($pause->effectively_installed());
 		self::assertSame(array('\minos\moderation\migrations\install_data'), gateway_pause::depends_on());
 		self::assertTrue($shared_pause->effectively_installed());
