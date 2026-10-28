@@ -26,6 +26,22 @@ class forum
 	/** The largest `meta.links` value the gateway keeps. */
 	const MAX_LINKS = 100000;
 
+	/** phpBB's `GROUP_SPECIAL` (`includes/constants.php`): a group phpBB itself created. */
+	const GROUP_SPECIAL = 3;
+
+	/**
+	 * phpBB's `GROUP_OPEN` and `GROUP_FREE`: groups a member may leave by himself in the UCP
+	 * (`ucp_groups`, "resign", refused for any other type), and join (`GROUP_FREE` without
+	 * approval).
+	 */
+	const GROUPS_OPEN = array(0, 4);
+
+	/** phpBB's notification types that tell moderators a post or topic waits for approval. */
+	const QUEUE_NOTIFICATIONS = array('notification.type.topic_in_queue', 'notification.type.post_in_queue');
+
+	/** phpBB's notification method that only lists a notification on the board (no e-mail). */
+	const BOARD_METHOD = 'notification.method.board';
+
 	/** The gateway's mask character. */
 	const MASK = '█';
 
@@ -93,6 +109,15 @@ class forum
 	/** @var string */
 	protected $users_table;
 
+	/** @var string */
+	protected $groups_table;
+
+	/** @var string */
+	protected $user_group_table;
+
+	/** @var string */
+	protected $poll_options_table;
+
 	/**
 	 * @param \phpbb\db\driver\driver_interface     $db            The database.
 	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
@@ -105,6 +130,9 @@ class forum
 	 * @param string                                $topics_table
 	 * @param string                                $forums_table
 	 * @param string                                $users_table
+	 * @param string                                $groups_table
+	 * @param string                                $user_group_table
+	 * @param string                                $poll_options_table
 	 */
 	public function __construct(
 		\phpbb\db\driver\driver_interface $db,
@@ -117,7 +145,10 @@ class forum
 		$posts_table,
 		$topics_table,
 		$forums_table,
-		$users_table
+		$users_table,
+		$groups_table,
+		$user_group_table,
+		$poll_options_table
 	)
 	{
 		$this->db = $db;
@@ -131,6 +162,9 @@ class forum
 		$this->topics_table = $topics_table;
 		$this->forums_table = $forums_table;
 		$this->users_table = $users_table;
+		$this->groups_table = $groups_table;
+		$this->user_group_table = $user_group_table;
+		$this->poll_options_table = $poll_options_table;
 	}
 
 	/**
@@ -277,9 +311,38 @@ class forum
 	}
 
 	/**
-	 * The whole text the gateway reads for a post: its title ({@see title_of}), a blank line
-	 * and the post's plain text ({@see plain_text}). A title alone is never sent: without
-	 * text to assess in the post itself, the result is ''. The text is NOT shortened here.
+	 * The poll a post carries, as a reader sees it: its question, then each option on a line of
+	 * its own (the plugins' shared rule D9.1: a poll's question and options are part of the text
+	 * of the post that carries the poll). In phpBB the poll belongs to the topic and is edited
+	 * with its first post, which carries it; the question and the options are stored as parsed
+	 * text, as a post is.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return string The poll, or '' for none.
+	 */
+	public function poll_of(array $post)
+	{
+		if ((int) $post['post_id'] !== (int) $post['topic_first_post_id'] || !isset($post['poll_title']) || (string) $post['poll_title'] === '')
+		{
+			return '';
+		}
+		$lines = array($this->plain_text((string) $post['poll_title']));
+		$result = $this->db->sql_query('SELECT poll_option_text FROM ' . $this->poll_options_table . '
+			WHERE topic_id = ' . (int) $post['topic_id'] . '
+			ORDER BY poll_option_id');
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$lines[] = $this->plain_text((string) $row['poll_option_text']);
+		}
+		$this->db->sql_freeresult($result);
+		return trim(implode("\n", array_filter($lines, 'strlen')));
+	}
+
+	/**
+	 * The whole text the gateway reads for a post: its title ({@see title_of}), the poll it
+	 * carries ({@see poll_of}) and the post's plain text ({@see plain_text}), a blank line
+	 * between each two. A title alone is never sent: without text to assess in the post itself
+	 * or its poll, the result is ''. The text is NOT shortened here.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
 	 * @return string
@@ -287,12 +350,12 @@ class forum
 	public function text_of(array $post)
 	{
 		$text = $this->plain_text((string) $post['post_text']);
-		if ($text === '')
+		$poll = $this->poll_of($post);
+		if ($text === '' && $poll === '')
 		{
 			return '';
 		}
-		$title = $this->title_of($post);
-		return ($title !== '') ? $title . self::TITLE_SEPARATOR . $text : $text;
+		return implode(self::TITLE_SEPARATOR, array_filter(array($this->title_of($post), $poll, $text), 'strlen'));
 	}
 
 	/**
@@ -328,8 +391,8 @@ class forum
 	 *
 	 * Only when (a) it is the text sent ({@see text_of}, whole) with some characters replaced
 	 * by `█` - the same length in characters, every other character unchanged; (b) the title
-	 * sent with it is untouched: the extension never changes a title, so a mask in the title
-	 * is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
+	 * and the poll sent with it are untouched: the extension never changes a title or a poll,
+	 * so a mask in them is for a moderator; and (c) the post's text sent is exactly what the author wrote: no
 	 * BBCode, quote or attribute text was transformed on the way out, so publishing the masked
 	 * text changes nothing but the masked characters. Anything else is for a moderator to
 	 * apply by hand.
@@ -354,7 +417,7 @@ class forum
 		{
 			return null;
 		}
-		// Everything before the post's own text: the title and the blank line.
+		// Everything before the post's own text: the title, the poll and the blank lines.
 		$title_chars = count($sent_chars) - mb_strlen($body, 'UTF-8');
 		foreach ($masked_chars as $i => $char)
 		{
@@ -466,7 +529,7 @@ class forum
 	public function load_post($post_id)
 	{
 		$sql = 'SELECT p.*, t.topic_title, t.topic_first_post_id, t.topic_last_post_id, t.topic_time,
-				t.topic_last_post_time, t.topic_posts_approved, f.forum_name, u.username, u.user_posts
+				t.topic_last_post_time, t.topic_posts_approved, t.poll_title, f.forum_name, u.username, u.user_posts
 			FROM ' . $this->posts_table . ' p
 			INNER JOIN ' . $this->topics_table . ' t ON t.topic_id = p.topic_id
 			LEFT JOIN ' . $this->forums_table . ' f ON f.forum_id = p.forum_id
@@ -476,6 +539,64 @@ class forum
 		$row = $this->db->sql_fetchrow($result);
 		$this->db->sql_freeresult($result);
 		return $row ? $row : null;
+	}
+
+	/**
+	 * The board's user groups, for the ACP, in the order phpBB's own group lists use: the
+	 * special groups (guests, registered users, newly registered users, ...) first.
+	 *
+	 * @return array<int,array{group_id:int,group_name:string,special:bool,open:bool}>
+	 */
+	public function groups()
+	{
+		$groups = array();
+		$result = $this->db->sql_query('SELECT group_id, group_name, group_type
+			FROM ' . $this->groups_table . '
+			ORDER BY group_type DESC, group_name ASC');
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$groups[] = array(
+				'group_id'   => (int) $row['group_id'],
+				'group_name' => (string) $row['group_name'],
+				'special'    => (int) $row['group_type'] === self::GROUP_SPECIAL,
+				'open'       => in_array((int) $row['group_type'], self::GROUPS_OPEN, true),
+			);
+		}
+		$this->db->sql_freeresult($result);
+		return $groups;
+	}
+
+	/**
+	 * Whether a user belongs to one of some groups. Only an approved membership counts: phpBB
+	 * keeps a request to join a group as a row with `user_pending = 1`. A guest belongs to the
+	 * guests' group, as phpBB installs it.
+	 *
+	 * @param int            $user_id   The user.
+	 * @param array<int,int> $group_ids The groups.
+	 * @return bool|null Whether the user is a member; null when none of the groups exists any
+	 *     more (deleted since they were chosen).
+	 */
+	public function in_groups($user_id, array $group_ids)
+	{
+		$group_ids = array_values(array_unique(array_map('intval', $group_ids)));
+		if (!$group_ids)
+		{
+			return null;
+		}
+		$result = $this->db->sql_query('SELECT g.group_id, ug.user_id
+			FROM ' . $this->groups_table . ' g
+			LEFT JOIN ' . $this->user_group_table . ' ug
+				ON (ug.group_id = g.group_id AND ug.user_id = ' . (int) $user_id . ' AND ug.user_pending = 0)
+			WHERE ' . $this->db->sql_in_set('g.group_id', $group_ids));
+		$exists = false;
+		$member = false;
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			$exists = true;
+			$member = $member || ($row['user_id'] !== null);
+		}
+		$this->db->sql_freeresult($result);
+		return $exists ? $member : null;
 	}
 
 	/**
@@ -574,6 +695,28 @@ class forum
 		$this->set_visibility(ITEM_REAPPROVE, $post, '', $time);
 		$first = (int) $post['post_id'] <= (int) $post['topic_first_post_id'];
 		$this->notifications->add_notifications($first ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue', $post);
+	}
+
+	/**
+	 * Tells the moderators, once, that a post the extension leaves in the queue waits for them:
+	 * phpBB's own "post in the queue" (or "topic in the queue") notification with its e-mail.
+	 *
+	 * While the extension assessed the post, phpBB's notification of its posting reached the
+	 * board only ({@see \minos\moderation\event\listener::hold_back_queue_messages}); it is
+	 * withdrawn and sent again, so phpBB - which skips a user it already notified about the
+	 * item - delivers it by every method each moderator chose. Callers do this once per post
+	 * (`pending_store::mark_announced`): a second time would withdraw the board notice of a
+	 * moderator phpBB then skips for the e-mail it remembers.
+	 *
+	 * @param array<string,mixed> $post A row from {@see load_post}.
+	 * @return void
+	 */
+	public function notify_queue(array $post)
+	{
+		$first = (int) $post['post_id'] <= (int) $post['topic_first_post_id'];
+		$type = $first ? self::QUEUE_NOTIFICATIONS[0] : self::QUEUE_NOTIFICATIONS[1];
+		$this->notifications->delete_notifications($type, $first ? (int) $post['topic_id'] : (int) $post['post_id']);
+		$this->notifications->add_notifications($type, $post);
 	}
 
 	/**

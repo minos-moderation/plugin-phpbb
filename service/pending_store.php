@@ -25,7 +25,9 @@ namespace minos\moderation\service;
  * recorded for a revision whose text was never sent.
  *
  * `submitted_at` is when the wait for a verdict began: the gateway's `202`, or for a row the
- * gateway never accepted, its queueing (see {@see overdue}).
+ * gateway never accepted, its queueing (see {@see overdue}). `received_at` is when the
+ * gateway's outcome arrived; the two measure the time from sending to verdict
+ * ({@see verdict_stats}).
  */
 class pending_store
 {
@@ -67,6 +69,9 @@ class pending_store
 
 	/** Verdict recorded when the gateway refused the request (a configuration error). */
 	const VERDICT_REFUSED = 'refused';
+
+	/** The gateway's verdicts, as `kwalifikacja` (and `nieocenione`) name them. */
+	const GATEWAY_VERDICTS = array('bezpieczne', 'ocenzurowane', 'zablokowane', 'nieocenione');
 
 	/** @var \phpbb\db\driver\driver_interface */
 	protected $db;
@@ -187,6 +192,18 @@ class pending_store
 	}
 
 	/**
+	 * Rows whose post the extension still keeps in the queue: waiting for a verdict, or for a
+	 * recorded outcome to be applied.
+	 *
+	 * @param int $limit At most this many.
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function unsettled($limit)
+	{
+		return $this->select($this->db->sql_in_set('status', self::UNSETTLED), 'post_id', $limit);
+	}
+
+	/**
 	 * The newest rows, for the ACP.
 	 *
 	 * @param int $limit At most this many.
@@ -212,6 +229,21 @@ class pending_store
 		}
 		$this->db->sql_freeresult($result);
 		return $counts;
+	}
+
+	/**
+	 * Claims the one announcement of a post the extension leaves in the queue: the moderators
+	 * are told once per post (`announced`), whatever happens to it afterwards - a late
+	 * verdict, an edit, the assessment switched off and on. New revisions keep the mark.
+	 *
+	 * @param int $post_id The post.
+	 * @return bool True the first time: the caller tells the moderators now.
+	 */
+	public function mark_announced($post_id)
+	{
+		$this->db->sql_query('UPDATE ' . $this->table . ' SET announced = 1
+			WHERE post_id = ' . (int) $post_id . ' AND announced = 0');
+		return $this->db->sql_affectedrows() === 1;
 	}
 
 	/**
@@ -277,9 +309,11 @@ class pending_store
 	 * @param bool               $support    The gateway's `wsparcie`.
 	 * @param string|null        $masked     The gateway's `ocenzurowany`.
 	 * @param string             $error_code The refusal's code, for {@see VERDICT_REFUSED}.
+	 * @param int                $now        Unix seconds: when the gateway's outcome arrived
+	 *     (`received_at`); the extension's own outcomes arrive from nowhere and keep 0.
 	 * @return bool False when the row is unknown, of another revision, or already has one.
 	 */
-	public function record_verdict($post_id, $revision, $verdict, array $categories, $support, $masked, $error_code = '')
+	public function record_verdict($post_id, $revision, $verdict, array $categories, $support, $masked, $error_code = '', $now = 0)
 	{
 		$labels = array();
 		foreach ($categories as $label)
@@ -296,7 +330,89 @@ class pending_store
 			'support'     => $support ? 1 : 0,
 			'masked_text' => is_string($masked) ? $masked : '',
 			'error_code'  => self::code($error_code),
+			'received_at' => self::is_own_outcome($verdict) ? 0 : (int) $now,
 		), $post_id, $revision, self::OPEN, false, array(self::PUBLISHED, self::HELD), !self::is_own_outcome($verdict));
+	}
+
+	/**
+	 * What the gateway answered lately, for the ACP: how long its verdicts took from the `202`
+	 * (`submitted_at`) to their delivery (`received_at`) - the median and the 95th percentile,
+	 * by nearest rank - and how many of each it gave, all over the outcomes that arrived since a
+	 * moment; and how many posts got no verdict in time (their time-out handled since then, and
+	 * no late verdict after it). Times and counts only, never content.
+	 *
+	 * @param int $since Unix seconds.
+	 * @return array{count:int,p50:int|null,p95:int|null,verdicts:array<string,int>,timeouts:int}
+	 */
+	public function verdict_stats($since)
+	{
+		$verdicts = array_fill_keys(self::GATEWAY_VERDICTS, 0);
+		$result = $this->db->sql_query('SELECT verdict, COUNT(post_id) AS total FROM ' . $this->table . '
+			WHERE received_at >= ' . max(1, (int) $since) . '
+			GROUP BY verdict');
+		while ($row = $this->db->sql_fetchrow($result))
+		{
+			if (isset($verdicts[(string) $row['verdict']]))
+			{
+				$verdicts[(string) $row['verdict']] = (int) $row['total'];
+			}
+		}
+		$this->db->sql_freeresult($result);
+
+		// The wait is measured where the outcome came after its 202 (never a negative time).
+		$timed = ' FROM ' . $this->table . '
+			WHERE received_at >= ' . max(1, (int) $since) . '
+				AND submitted_at > 0
+				AND received_at >= submitted_at';
+		$count = $this->number('SELECT COUNT(post_id) AS total' . $timed);
+		$timeouts = $this->number('SELECT COUNT(post_id) AS total FROM ' . $this->table . "
+			WHERE verdict = '" . self::VERDICT_TIMEOUT . "'
+				AND handled_at >= " . (int) $since);
+
+		return array(
+			'count'    => $count,
+			'p50'      => $this->nth_wait($timed, $count, 50),
+			'p95'      => $this->nth_wait($timed, $count, 95),
+			'verdicts' => $verdicts,
+			'timeouts' => $timeouts,
+		);
+	}
+
+	/**
+	 * A percentile of the waits, by nearest rank: the smallest wait at least that share of
+	 * them does not exceed.
+	 *
+	 * @param string $from       The `FROM ... WHERE ...` of the measured rows.
+	 * @param int    $count      How many there are.
+	 * @param int    $percentile 1 to 100.
+	 * @return int|null Seconds, or null without a row.
+	 */
+	protected function nth_wait($from, $count, $percentile)
+	{
+		if ($count < 1)
+		{
+			return null;
+		}
+		$rank = (int) ceil($percentile * $count / 100);
+		$result = $this->db->sql_query_limit('SELECT received_at - submitted_at AS wait_s' . $from . '
+			ORDER BY wait_s ASC', 1, max(0, $rank - 1));
+		$row = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $row ? (int) $row['wait_s'] : null;
+	}
+
+	/**
+	 * The `total` of a one-row count.
+	 *
+	 * @param string $sql The query.
+	 * @return int
+	 */
+	protected function number($sql)
+	{
+		$result = $this->db->sql_query($sql);
+		$row = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $row ? (int) $row['total'] : 0;
 	}
 
 	/**
@@ -377,6 +493,7 @@ class pending_store
 				'sent_md5'     => '',
 				'approved_at'  => 0,
 				'approved_md5' => '',
+				'received_at'  => 0,
 			)) . '
 			WHERE post_id = ' . (int) $post_id . '
 				AND ' . $this->reopenable();
@@ -410,6 +527,7 @@ class pending_store
 				'sent_md5'     => '',
 				'approved_at'  => 0,
 				'approved_md5' => '',
+				'received_at'  => 0,
 			)) . '
 			WHERE ' . $this->db->sql_in_set('status', self::OPEN));
 		return (int) $this->db->sql_affectedrows();

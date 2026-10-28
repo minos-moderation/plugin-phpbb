@@ -17,8 +17,9 @@ use minos\moderation\platform\forum;
  *
  * What leaves the forum is exactly: an id (`phpbb:<post id>`, with `.<revision>` after an
  * edit), the post's plain text - for the first post of a topic preceded by the topic's title
- * and a blank line, for a reply by its own subject when the author changed phpBB's default
- * "Re: ..." - (its first 3000 characters, title included), the profile, and the spam signals
+ * and a blank line (and by the topic's poll, its question and options, and a blank line), for
+ * a reply by its own subject when the author changed phpBB's default "Re: ..." - (its first
+ * 3000 characters, title and poll included), the profile, and the spam signals
  * (`links`, `link_domains`, `author_first_post`). Never an e-mail, an IP address or a user
  * id.
  *
@@ -29,10 +30,17 @@ use minos\moderation\platform\forum;
  * - `429`, `503`, another `5xx`, no answer at all, or an answer that is not the gateway's:
  *   the rows are retried after `blad.ponow_za_s`, or after a backoff doubling from 60 s -
  *   unless `ponow_za_s` ends after a row's time-out: no verdict can come in time, so the
- *   failure mode applies at once (the plugins' shared rule D9.3). A spent daily limit or an
- *   overloaded gateway is also remembered for the ACP until the next `202`;
+ *   failure mode applies at once (the plugins' shared rule D9.3);
  * - any other refusal (`3xx`, `4xx`): a configuration error that retrying cannot fix. The
  *   failure mode applies, and the status and the code go to the error log and the ACP.
+ *
+ * A `429`, a `503` or no answer at all also starts the shared pause of sending
+ * ({@see settings::record_pause}): until `ponow_za_s` (or 60 s) has passed, nothing is sent -
+ * a post from an author's request waits in the queue for the cron task, and a run of the
+ * cron task sends no further batch. Every refusal by the key's limits spends its allowance,
+ * so one refused request is better than one per post. A post whose wait for a verdict ends
+ * before the pause does gets the failure mode at once, as above. The next `202` ends the
+ * pause; the ACP shows it until then.
  */
 class submitter
 {
@@ -57,11 +65,17 @@ class submitter
 	/** The prefix of every item id. */
 	const ID_PREFIX = 'phpbb:';
 
-	/** The gateway's refusals that pause it for the key ({@see settings::PAUSE_LIMIT}) or for all. */
+	/**
+	 * The kind of pause each `429` code starts ({@see settings::record_pause}); a `429` with
+	 * any other code pauses as the key's limit ({@see settings::PAUSE_KEY}), a `503` and no
+	 * answer at all as an unavailable gateway ({@see settings::PAUSE_UNAVAILABLE}).
+	 */
 	const PAUSES = array(
-		'limit_dobowy_klucza' => settings::PAUSE_LIMIT,
-		'limit_globalny_b2b'  => settings::PAUSE_OVERLOAD,
-		'kolejka_pelna'       => settings::PAUSE_OVERLOAD,
+		'limit_dobowy_klucza'   => settings::PAUSE_LIMIT,
+		'limit_globalny_b2b'    => settings::PAUSE_OVERLOAD,
+		'kolejka_pelna'         => settings::PAUSE_OVERLOAD,
+		'limit_minutowy_klucza' => settings::PAUSE_KEY,
+		'limit_w_locie_klucza'  => settings::PAUSE_KEY,
 	);
 
 	/** Error labels of the extension's own (the gateway's codes are kept as sent). */
@@ -134,6 +148,10 @@ class submitter
 	 * Sends queued rows, in batches the gateway accepts - or, while the extension cannot
 	 * submit ({@see settings::is_ready}), gives them the failure mode at once.
 	 *
+	 * Nothing is sent while the gateway's pause lasts ({@see settings::pause}), and once an
+	 * answer starts one, no further batch is sent: the rows left wait for the cron task
+	 * ({@see hold_back}).
+	 *
 	 * @param array<int,array<string,mixed>> $rows Queued rows.
 	 * @param int                            $now  Unix seconds.
 	 * @return void
@@ -155,12 +173,20 @@ class submitter
 			}
 			return;
 		}
+		$rows = array_values($rows);
 		$batch = array();
-		foreach ($rows as $row)
+		foreach ($rows as $index => $row)
 		{
 			if ($row['status'] !== pending_store::QUEUED)
 			{
 				continue;
+			}
+			// Before each batch: a pause, also one the previous batch's answer started, stops it.
+			$pause = $batch ? null : $this->settings->pause($now);
+			if ($pause !== null)
+			{
+				$this->hold_back(array_slice($rows, $index), $pause, $now);
+				return;
 			}
 			$entry = $this->guarded((int) $row['post_id'], function () use ($row, $now) {
 				return $this->prepare($row, $now);
@@ -180,6 +206,58 @@ class submitter
 		{
 			$this->send($batch, $now);
 		}
+	}
+
+	/**
+	 * What the gateway's pause leaves unsent: a row waits, queued, for the cron task after
+	 * the pause - unless its wait for a verdict ends before the pause does, when no verdict
+	 * can come in time and the failure mode applies at once (the plugins' shared rule D9.3).
+	 *
+	 * @param array<int,array<string,mixed>>         $rows  Rows not sent.
+	 * @param array{kind:string,code:string,until:int} $pause The pause.
+	 * @param int                                     $now   Unix seconds.
+	 * @return void
+	 */
+	protected function hold_back(array $rows, array $pause, $now)
+	{
+		$code = ($pause['code'] !== '') ? $pause['code'] : 'paused';
+		foreach ($rows as $row)
+		{
+			if ($row['status'] === pending_store::QUEUED
+				&& $pause['until'] > (int) $row['submitted_at'] + $this->settings->timeout_seconds())
+			{
+				$this->guarded((int) $row['post_id'], function () use ($row, $code, $now) {
+					return $this->applier->fail($row, pending_store::VERDICT_TIMEOUT, $code, $now);
+				});
+			}
+		}
+	}
+
+	/**
+	 * Starts the shared pause of sending after an answer that asks to wait.
+	 *
+	 * @param int|null $status      The HTTP status, or null for no answer at all.
+	 * @param string   $code        The refusal's code, or the extension's label.
+	 * @param int|null $retry_after The gateway's `ponow_za_s`.
+	 * @param int      $now         Unix seconds.
+	 * @return void
+	 */
+	protected function pause_sending($status, $code, $retry_after, $now)
+	{
+		if ($status === 429)
+		{
+			$kind = array_key_exists($code, self::PAUSES) ? self::PAUSES[$code] : settings::PAUSE_KEY;
+		}
+		else if ($status === null || $status === 503)
+		{
+			$kind = settings::PAUSE_UNAVAILABLE;
+		}
+		else
+		{
+			return;
+		}
+		$wait = ($retry_after !== null && $retry_after > 0) ? min(self::MAX_RETRY_AFTER_S, $retry_after) : self::FIRST_BACKOFF_S;
+		$this->settings->record_pause($kind, $code, $now + $wait);
 	}
 
 	/**
@@ -267,6 +345,7 @@ class submitter
 
 		if ($answer === null)
 		{
+			$this->pause_sending(null, self::ERROR_NETWORK, null, $now);
 			$this->retry($batch, null, self::ERROR_NETWORK, $now);
 			return;
 		}
@@ -294,11 +373,9 @@ class submitter
 		if ($status === 429 || $status >= 500)
 		{
 			$retry_after = (isset($error['ponow_za_s']) && is_int($error['ponow_za_s'])) ? $error['ponow_za_s'] : null;
-			if ($status === 429 && array_key_exists($code, self::PAUSES))
-			{
-				$this->settings->record_pause(self::PAUSES[$code], $now + (($retry_after !== null && $retry_after > 0) ? $retry_after : self::FIRST_BACKOFF_S));
-			}
-			$this->retry($batch, $retry_after, ($code !== '') ? $code : 'http_' . $status, $now);
+			$code = ($code !== '') ? $code : 'http_' . $status;
+			$this->pause_sending($status, $code, $retry_after, $now);
+			$this->retry($batch, $retry_after, $code, $now);
 			return;
 		}
 

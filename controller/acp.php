@@ -10,14 +10,16 @@
 
 namespace minos\moderation\controller;
 
+use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
  * The ACP page "Minos": the settings, the webhook URL to register with the key, the
- * gateway's pause (a spent daily limit, an overload) until its next acceptance, the last
- * refusal of the gateway, and the posts the extension handled lately.
+ * gateway's pause of sending (the key's limits, an overload, an unavailable gateway) until
+ * its next acceptance, the last refusal of the gateway, how long the gateway's verdicts took
+ * and how many of each it gave in the last 7 days, and the posts the extension handled lately.
  *
  * The key and the secret are write-only here: the form never carries them back, the page
  * shows a prefix of each, and an empty field keeps the stored value.
@@ -30,6 +32,12 @@ class acp
 	/** Rows in the list of recent posts. */
 	const RECENT = 50;
 
+	/** Days the verdict times and counts cover. */
+	const STATS_DAYS = 7;
+
+	/** Waiting posts whose moderators are e-mailed when the assessment is switched off. */
+	const NOTIFY_LIMIT = 1000;
+
 	/** The webhook route's name. */
 	const WEBHOOK_ROUTE = 'minos_moderation_webhook';
 
@@ -38,6 +46,9 @@ class acp
 
 	/** @var pending_store */
 	protected $store;
+
+	/** @var forum */
+	protected $forum;
 
 	/** @var \phpbb\request\request_interface */
 	protected $request;
@@ -66,6 +77,7 @@ class acp
 	/**
 	 * @param settings                         $settings  The administrator's settings.
 	 * @param pending_store                    $store     The pending rows.
+	 * @param forum                            $forum     The board's user groups; the queue's notices.
 	 * @param \phpbb\request\request_interface $request   The form.
 	 * @param \phpbb\template\template         $template  The page.
 	 * @param \phpbb\language\language         $language  The texts.
@@ -75,12 +87,13 @@ class acp
 	 * @param string                           $root_path phpBB's root path.
 	 * @param string                           $php_ext   `php`.
 	 */
-	public function __construct(settings $settings, pending_store $store, \phpbb\request\request_interface $request,
+	public function __construct(settings $settings, pending_store $store, forum $forum, \phpbb\request\request_interface $request,
 		\phpbb\template\template $template, \phpbb\language\language $language, \phpbb\log\log_interface $log,
 		\phpbb\user $user, \phpbb\controller\helper $helper, $root_path, $php_ext)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
+		$this->forum = $forum;
 		$this->request = $request;
 		$this->template = $template;
 		$this->language = $language;
@@ -104,6 +117,7 @@ class acp
 
 		$errors = array();
 		$saved = false;
+		$groups = $this->forum->groups();
 		if ($this->request->is_set_post('submit'))
 		{
 			if (!check_form_key(self::FORM_KEY))
@@ -113,7 +127,7 @@ class acp
 			else
 			{
 				$was_enabled = $this->settings->enabled();
-				$errors = $this->settings->save($this->read_form());
+				$errors = $this->settings->save($this->read_form(), array_column($groups, 'group_id'));
 				if (!$errors)
 				{
 					$saved = true;
@@ -121,6 +135,11 @@ class acp
 					{
 						// Switched on again: what waited is sent again, with a fresh time-out.
 						$this->store->restart_waiting(time());
+					}
+					else if ($was_enabled && !$this->settings->enabled())
+					{
+						// Switched off: what waits is the moderators' alone now.
+						$this->notify_waiting();
 					}
 					$this->log->add('admin', $this->user->data['user_id'], $this->user->ip, 'LOG_MINOS_SETTINGS_UPDATED');
 				}
@@ -137,6 +156,8 @@ class acp
 		$pause = $this->settings->pause(time());
 		$counts = $this->store->counts() + array_fill_keys(pending_store::UNSETTLED, 0) + array(pending_store::HELD => 0);
 		$waiting = $counts[pending_store::QUEUED] + $counts[pending_store::PENDING] + $counts[pending_store::RECEIVED];
+		$stats = $this->store->verdict_stats(time() - self::STATS_DAYS * 86400);
+		$verdicts = $stats['verdicts'];
 		$this->template->assign_vars(array(
 			'U_ACTION'              => $u_action,
 			'S_MINOS_SAVED'         => $saved,
@@ -160,9 +181,25 @@ class acp
 			'MINOS_LAST_ERROR_HELP' => ($last_error !== null) ? self::escape($this->error_help($last_error['code'])) : '',
 			'MINOS_LAST_ERROR_TIME' => ($last_error !== null) ? $this->user->format_date($last_error['time']) : '',
 			'MINOS_RECENT_EXPLAIN'  => self::escape($this->language->lang('MINOS_RECENT_EXPLAIN', $waiting, $counts[pending_store::HELD])),
+			'S_MINOS_STATS'         => ($stats['count'] + array_sum($verdicts) + $stats['timeouts']) > 0,
+			'MINOS_STATS_WAIT'      => ($stats['count'] > 0) ? self::escape($this->language->lang('MINOS_STATS_WAIT',
+				$this->duration((int) $stats['p50']), $this->duration((int) $stats['p95']), $stats['count'])) : '',
+			'MINOS_STATS_VERDICTS'  => self::escape($this->language->lang('MINOS_STATS_VERDICTS', $verdicts['bezpieczne'],
+				$verdicts['ocenzurowane'], $verdicts['zablokowane'], $verdicts['nieocenione'], $stats['timeouts'])),
 			'S_FORUM_OPTIONS'       => make_forum_select($this->settings->forum_ids(), false, true, true, true, false, false),
 			'S_MINOS_ALL_FORUMS'    => !$this->settings->forum_ids(),
+			'S_MINOS_ALL_GROUPS'    => !$this->settings->group_ids(),
 		));
+
+		$chosen = $this->settings->group_ids();
+		foreach ($groups as $group)
+		{
+			$this->template->assign_block_vars('minos_groups', array(
+				'VALUE'      => $group['group_id'],
+				'LABEL'      => self::escape($group['open'] ? $this->language->lang('MINOS_GROUP_OPEN', $this->group_name($group)) : $this->group_name($group)),
+				'S_SELECTED' => in_array($group['group_id'], $chosen, true),
+			));
+		}
 
 		$this->choices('minos_profiles', settings::PROFILES, $this->settings->profile(), 'MINOS_PROFILE_');
 		$this->choices('minos_fail_modes', array(settings::FAIL_OPEN, settings::FAIL_CLOSED), $this->settings->fail_mode(), 'MINOS_FAIL_MODE_');
@@ -226,6 +263,7 @@ class acp
 			'censored'       => $this->request->variable('minos_censored', ''),
 			'blocked'        => $this->request->variable('minos_blocked', ''),
 			'forums'         => $this->request->variable('minos_forums', array(0)),
+			'groups'         => $this->request->variable('minos_groups', array(0)),
 		);
 	}
 
@@ -262,6 +300,60 @@ class acp
 	{
 		$url = $this->settings->gateway_url();
 		return ($url !== '') ? $url : settings::DEFAULT_GATEWAY_URL;
+	}
+
+	/**
+	 * Gives the moderators the e-mail held back while the extension assessed a post
+	 * ({@see forum::notify_queue}), for every post it still keeps in the queue: switched off,
+	 * it decides nothing more about them.
+	 *
+	 * @return void
+	 */
+	protected function notify_waiting()
+	{
+		foreach ($this->store->unsettled(self::NOTIFY_LIMIT) as $row)
+		{
+			$post = $this->forum->load_post((int) $row['post_id']);
+			if ($post !== null && $this->forum->awaits_approval($post) && $this->store->mark_announced((int) $row['post_id']))
+			{
+				$this->forum->notify_queue($post);
+			}
+		}
+	}
+
+	/**
+	 * A time span as the administrator reads it: seconds, minutes and seconds, or hours and
+	 * minutes.
+	 *
+	 * @param int $seconds The span.
+	 * @return string
+	 */
+	protected function duration($seconds)
+	{
+		$seconds = max(0, (int) $seconds);
+		if ($seconds < 60)
+		{
+			return $this->language->lang('MINOS_DURATION_S', $seconds);
+		}
+		if ($seconds < 3600)
+		{
+			return $this->language->lang('MINOS_DURATION_MIN', intdiv($seconds, 60), $seconds % 60);
+		}
+		return $this->language->lang('MINOS_DURATION_H', intdiv($seconds, 3600), intdiv($seconds % 3600, 60));
+	}
+
+	/**
+	 * A group's name as phpBB's own lists show it: a group phpBB created under its name in the
+	 * board's language (`G_` and the stored name, as `\phpbb\group\helper::get_name()`).
+	 *
+	 * @param array{group_id:int,group_name:string,special:bool,open:bool} $group The group.
+	 * @return string
+	 */
+	protected function group_name(array $group)
+	{
+		$key = 'G_' . strtoupper($group['group_name']);
+		$text = $group['special'] ? $this->language->lang($key) : $key;
+		return ($text === $key) ? $group['group_name'] : $text;
 	}
 
 	/**

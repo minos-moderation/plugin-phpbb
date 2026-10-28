@@ -26,7 +26,8 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * the gateway did not see.
  *
  * Not held: posts by administrators and moderators of the forum; posts phpBB queues for a
- * moderator anyway (no `f_noapprove`); posts another extension already set a visibility for;
+ * moderator anyway (no `f_noapprove`); posts by users outside the groups the administrator
+ * chose (none chosen: every group); posts another extension already set a visibility for;
  * replies with neither text to assess, a link nor a subject of their own (attachments only);
  * and everything while the extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
  * address), it holds new posts and gives them the failure mode at once (the plugins' shared
@@ -39,6 +40,12 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * MCP: the approval queue marks the posts the extension holds, and a post's details show
  * the outcome, including the gateway's call for support (`wsparcie`).
+ *
+ * Notifications: phpBB tells the moderators of every post it stores in the queue at once,
+ * also by e-mail. For a post the extension holds, that notification is kept on the board
+ * only (`core.notification_manager_add_notifications`); the e-mail goes out when the
+ * extension leaves the post in the queue for a moderator ({@see forum::notify_queue}), never
+ * for a post it publishes.
  */
 class listener implements EventSubscriberInterface
 {
@@ -69,6 +76,9 @@ class listener implements EventSubscriberInterface
 	/** @var \phpbb\language\language */
 	protected $language;
 
+	/** @var \phpbb\user */
+	protected $user;
+
 	/**
 	 * @param settings                 $settings  The administrator's settings.
 	 * @param pending_store            $store     The pending rows.
@@ -76,9 +86,10 @@ class listener implements EventSubscriberInterface
 	 * @param submitter                $submitter Sends posts to the gateway.
 	 * @param \phpbb\auth\auth         $auth      The poster's permissions.
 	 * @param \phpbb\language\language $language  The MCP labels.
+	 * @param \phpbb\user              $user      The poster (a new post is always the current user's).
 	 */
 	public function __construct(settings $settings, pending_store $store, forum $forum, submitter $submitter,
-		\phpbb\auth\auth $auth, \phpbb\language\language $language)
+		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
@@ -86,6 +97,7 @@ class listener implements EventSubscriberInterface
 		$this->submitter = $submitter;
 		$this->auth = $auth;
 		$this->language = $language;
+		$this->user = $user;
 	}
 
 	/**
@@ -98,6 +110,7 @@ class listener implements EventSubscriberInterface
 			'core.submit_post_end'                   => 'send_for_assessment',
 			'core.mcp_queue_get_posts_modify_post_row' => 'mark_queue_row',
 			'core.mcp_queue_approve_details_template'  => 'show_queue_details',
+			'core.notification_manager_add_notifications' => 'hold_back_queue_messages',
 		);
 	}
 
@@ -164,10 +177,49 @@ class listener implements EventSubscriberInterface
 		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now) : $this->store->create($post_id, $now);
 		if (!$queued)
 		{
+			// Nothing to assess it with: the moderators get phpBB's e-mail, held back for it
+			// (once, if the post has a row).
+			$post = $this->forum->load_post($post_id);
+			if ($post !== null && $this->forum->awaits_approval($post)
+				&& ($this->store->find($post_id) === null || $this->store->mark_announced($post_id)))
+			{
+				$this->forum->notify_queue($post);
+			}
 			return;
 		}
 		// Sent at once; without a usable configuration, the failure mode at once instead.
 		$this->submitter->submit(array($this->store->find($post_id)), $now);
+	}
+
+	/**
+	 * Keeps phpBB's "post (topic) in the queue" notification of a post the extension holds on
+	 * the board only: the e-mail (or any other message) waits until the extension leaves the
+	 * post for a moderator ({@see forum::notify_queue}), and a post it publishes sends none.
+	 *
+	 * The post is the extension's by the flag {@see hold_for_assessment} put into phpBB's post
+	 * data, which `submit_post()` passes into the notification's data.
+	 *
+	 * @param \phpbb\event\data $event `notification_type_name`, `data`, `notify_users` (user id
+	 *     => the methods), `options`.
+	 * @return void
+	 */
+	public function hold_back_queue_messages($event)
+	{
+		$data = $event['data'];
+		if (!in_array((string) $event['notification_type_name'], forum::QUEUE_NOTIFICATIONS, true)
+			|| !is_array($data) || empty($data[self::FLAG]))
+		{
+			return;
+		}
+		$board_only = array();
+		foreach ((array) $event['notify_users'] as $user_id => $methods)
+		{
+			if (in_array(forum::BOARD_METHOD, (array) $methods, true))
+			{
+				$board_only[$user_id] = array(forum::BOARD_METHOD);
+			}
+		}
+		$event['notify_users'] = $board_only;
 	}
 
 	/**
@@ -257,6 +309,12 @@ class listener implements EventSubscriberInterface
 			return false;
 		}
 		if (!$this->auth->acl_get('f_noapprove', $forum_id))
+		{
+			return false;
+		}
+		// Only members of the chosen groups; groups that no longer exist choose nobody out.
+		$groups = $this->settings->group_ids();
+		if ($groups && $this->forum->in_groups((int) $this->user->data['user_id'], $groups) === false)
 		{
 			return false;
 		}

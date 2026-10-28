@@ -76,16 +76,15 @@ final class FailureIsolationTest extends TestCase
 
 	public function testASubmissionThatFailsForOneRowLeavesTheRestOfTheBatch(): void
 	{
-		for ($i = 0; $i < 3; $i++)
-		{
-			$this->gateway->refuse(503, 'kolejka_niedostepna');
-		}
+		// The first post's 503 pauses sending: the other two wait for the cron, unsent.
+		$this->gateway->refuse(503, 'kolejka_niedostepna');
 		$this->three_posts(pending_store::QUEUED);
 		$this->break_row($this->posts[1]);
 
 		$this->board->sweeper()->sweep(time() + 61);
 
-		$ids = array_column($this->gateway->items(3), 'id');
+		$ids = array_column($this->gateway->items(1), 'id');
+		sort($ids);
 		self::assertSame(array('phpbb:' . $this->posts[0], 'phpbb:' . $this->posts[2]), $ids,
 			'one batch, without the row whose digest could not be stored before sending');
 		self::assertSame(pending_store::PENDING, $this->board->row($this->posts[0])['status']);

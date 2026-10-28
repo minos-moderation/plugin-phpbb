@@ -7,6 +7,8 @@ use minos\moderation\cron\sweeper;
 use minos\moderation\event\deferred_verdicts;
 use minos\moderation\event\listener;
 use minos\moderation\migrations\install_schema;
+use minos\moderation\migrations\queue_notice;
+use minos\moderation\migrations\verdict_times;
 use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\receiver;
@@ -42,6 +44,20 @@ class Board
 	/** Her e-mail address and IP: they must never reach a request. */
 	const USER_EMAIL = 'autorka@forum.example';
 	const USER_IP = '198.51.100.23';
+
+	/** A newly registered user (phpBB's NEWLY_REGISTERED group, besides REGISTERED). */
+	const NEW_USER = 3;
+
+	/** phpBB's special groups as it installs them (`install/schemas/schema_data.sql`). */
+	const GROUP_GUESTS = 1;
+	const GROUP_REGISTERED = 2;
+	const GROUP_NEWLY_REGISTERED = 7;
+
+	/** A group the administrator made, open (a member may leave it); the author belongs to it. */
+	const GROUP_TRUSTED = 10;
+
+	/** A closed group the administrator made (a member cannot leave it by himself). */
+	const GROUP_TEAM = 11;
 
 	/** phpBB's table prefix. */
 	const PREFIX = 'phpbb_';
@@ -100,6 +116,9 @@ class Board
 	/** @var \phpbb\auth\auth */
 	public $auth;
 
+	/** @var \phpbb\user The user who posts. */
+	public $user;
+
 	/** @var listener */
 	public $listener;
 
@@ -134,7 +153,8 @@ class Board
 		$board->log = new MemoryLog();
 		$board->language = new \phpbb\language\language(__DIR__ . '/../../language/pl');
 		$board->forum = new forum($board->db, $board->visibility, $board->notifications, new TextUtils(), $board->parser,
-			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users');
+			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users',
+			self::PREFIX . 'groups', self::PREFIX . 'user_group', self::PREFIX . 'poll_options');
 		$board->transport = $transport ?: new RecordingTransport();
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
@@ -143,7 +163,14 @@ class Board
 		$board->dispatcher = new RecordingDispatcher();
 		$board->auth = new \phpbb\auth\auth();
 		$board->auth->global['f_noapprove'] = true;
-		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language);
+		$board->user = new \phpbb\user();
+		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
+		// phpBB's dispatcher runs the extension's listener inside the notification manager.
+		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board) {
+			$events = listener::getSubscribedEvents();
+			$method = $events['core.notification_manager_add_notifications'];
+			$board->listener->$method($event);
+		};
 		return $board;
 	}
 
@@ -193,15 +220,18 @@ class Board
 	 *
 	 * @param string $text    The post's plain text (stored the way the parser stores it).
 	 * @param string $mode    `post`, `reply` or `quote`.
-	 * @param array  $options forum_id, poster_id, topic_id (for a reply), xml (a stored text),
+	 * @param array  $options forum_id, poster_id (also the current user), topic_id (for a reply), xml (a stored text),
 	 *     data (phpBB's post data as other extensions left it), title (of a new topic) or
-	 *     subject (of a reply), both as phpBB stores them (HTML-escaped).
+	 *     subject (of a reply), both as phpBB stores them (HTML-escaped), poll (of a new topic:
+	 *     its question and options, as typed).
 	 * @return array{post_id:int,visibility:int,data:array} The post and what phpBB stored.
 	 */
 	public function posting($text, $mode = 'post', array $options = array())
 	{
 		$forum_id = isset($options['forum_id']) ? $options['forum_id'] : self::FORUM;
 		$xml = isset($options['xml']) ? $options['xml'] : $this->xml($text);
+		// A new post is always the current user's.
+		$this->user->data['user_id'] = isset($options['poster_id']) ? (int) $options['poster_id'] : self::USER;
 		// What posting.php passes: the subject typed (`post_data`), and the topic's title, or a
 		// new topic's subject (`data`).
 		if (empty($options['topic_id']))
@@ -236,8 +266,19 @@ class Board
 			$visibility = $this->auth->acl_get('f_noapprove', $forum_id) ? ITEM_APPROVED : ITEM_UNAPPROVED;
 		}
 		$post_id = $this->write_post($xml, $visibility, $options + array('forum_id' => $forum_id));
+		if (isset($options['poll']))
+		{
+			$this->store_poll((int) $this->post($post_id)['topic_id'], $options['poll']['question'], $options['poll']['options']);
+		}
 
 		$data['post_id'] = $post_id;
+		// What submit_post() then sends for a post in the queue, with the post data the
+		// "before" event left (the extension's flag included).
+		if ($visibility === ITEM_UNAPPROVED)
+		{
+			$this->notifications->submit_post_notification(($mode === 'post') ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue',
+				$data + array('topic_id' => (int) $this->post($post_id)['topic_id']));
+		}
 		$this->listener->send_for_assessment(new \phpbb\event\data(array(
 			'mode'            => $mode,
 			'data'            => $data,
@@ -253,9 +294,11 @@ class Board
 	 * @param string      $text    Its new plain text.
 	 * @param string|null $title   Its new subject (as stored); for a topic's first post also
 	 *     the topic's title, as phpBB changes both.
+	 * @param array{question:string,options:array<int,string>}|null $poll The topic's poll, changed
+	 *     with its first post.
 	 * @return void
 	 */
-	public function edit($post_id, $text, $title = null)
+	public function edit($post_id, $text, $title = null, ?array $poll = null)
 	{
 		$post = $this->post($post_id);
 		$before = new \phpbb\event\data(array(
@@ -276,6 +319,17 @@ class Board
 		{
 			$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET topic_title = '" . $this->db->sql_escape($title) . "'
 				WHERE topic_first_post_id = " . (int) $post_id);
+		}
+		if ($poll !== null)
+		{
+			$this->store_poll((int) $post['topic_id'], $poll['question'], $poll['options']);
+		}
+		// submit_post() for an edit that puts a published post back into the queue.
+		if ($visibility === ITEM_REAPPROVE && (int) $post['post_visibility'] !== ITEM_REAPPROVE)
+		{
+			$first = (int) $post_id === (int) $this->first_post((int) $post['topic_id']);
+			$this->notifications->submit_post_notification($first ? 'notification.type.topic_in_queue' : 'notification.type.post_in_queue',
+				$data + array('topic_id' => (int) $post['topic_id']));
 		}
 		$this->listener->send_for_assessment(new \phpbb\event\data(array(
 			'mode'            => 'edit',
@@ -330,6 +384,44 @@ class Board
 		$row = $this->db->sql_fetchrow($result);
 		$this->db->sql_freeresult($result);
 		return $row;
+	}
+
+	/**
+	 * Stores a topic's poll as submit_post() does: the question in the topic, each option in
+	 * its own row, both parsed as a post is.
+	 *
+	 * @param int               $topic_id
+	 * @param string            $question
+	 * @param array<int,string> $options
+	 * @return void
+	 */
+	public function store_poll($topic_id, $question, array $options)
+	{
+		$this->db->sql_query('UPDATE ' . self::PREFIX . "topics SET poll_title = '" . $this->db->sql_escape($this->xml($question)) . "'
+			WHERE topic_id = " . (int) $topic_id);
+		$this->db->sql_query('DELETE FROM ' . self::PREFIX . 'poll_options WHERE topic_id = ' . (int) $topic_id);
+		foreach (array_values($options) as $index => $option)
+		{
+			$this->db->sql_query('INSERT INTO ' . self::PREFIX . 'poll_options ' . $this->db->sql_build_array('INSERT', array(
+				'poll_option_id'   => $index + 1,
+				'topic_id'         => (int) $topic_id,
+				'poll_option_text' => $this->xml($option),
+			)));
+		}
+	}
+
+	/**
+	 * The first post of a topic.
+	 *
+	 * @param int $topic_id
+	 * @return int
+	 */
+	public function first_post($topic_id)
+	{
+		$result = $this->db->sql_query('SELECT topic_first_post_id FROM ' . self::PREFIX . 'topics WHERE topic_id = ' . (int) $topic_id);
+		$topic = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		return $topic ? (int) $topic['topic_first_post_id'] : 0;
 	}
 
 	/**
@@ -445,7 +537,7 @@ class Board
 
 	/**
 	 * Creates phpBB's tables (the columns the extension and the fakes touch) and the
-	 * extension's own table, from its migration.
+	 * extension's own table, from its migrations (the table, then the columns added later).
 	 *
 	 * @return void
 	 */
@@ -458,14 +550,31 @@ class Board
 		$this->db->pdo->exec("CREATE TABLE {$prefix}topics (topic_id INTEGER PRIMARY KEY, forum_id INTEGER NOT NULL DEFAULT 0,
 			topic_title TEXT NOT NULL DEFAULT '', topic_first_post_id INTEGER NOT NULL DEFAULT 0, topic_last_post_id INTEGER NOT NULL DEFAULT 0,
 			topic_time INTEGER NOT NULL DEFAULT 0, topic_last_post_time INTEGER NOT NULL DEFAULT 0,
-			topic_posts_approved INTEGER NOT NULL DEFAULT 0, topic_visibility INTEGER NOT NULL DEFAULT 0)");
+			topic_posts_approved INTEGER NOT NULL DEFAULT 0, topic_visibility INTEGER NOT NULL DEFAULT 0,
+			poll_title TEXT NOT NULL DEFAULT '')");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}poll_options (poll_option_id INTEGER NOT NULL DEFAULT 0,
+			topic_id INTEGER NOT NULL DEFAULT 0, poll_option_text TEXT NOT NULL DEFAULT '', poll_option_total INTEGER NOT NULL DEFAULT 0)");
 		$this->db->pdo->exec("CREATE TABLE {$prefix}posts (post_id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER NOT NULL DEFAULT 0,
 			forum_id INTEGER NOT NULL DEFAULT 0, poster_id INTEGER NOT NULL DEFAULT 0, poster_ip TEXT NOT NULL DEFAULT '',
 			post_time INTEGER NOT NULL DEFAULT 0, post_visibility INTEGER NOT NULL DEFAULT 0, post_subject TEXT NOT NULL DEFAULT '',
 			post_text TEXT NOT NULL DEFAULT '', post_username TEXT NOT NULL DEFAULT '', post_checksum TEXT NOT NULL DEFAULT '',
 			bbcode_uid TEXT NOT NULL DEFAULT '', bbcode_bitfield TEXT NOT NULL DEFAULT '', post_delete_reason TEXT NOT NULL DEFAULT '',
 			post_delete_user INTEGER NOT NULL DEFAULT 0, post_delete_time INTEGER NOT NULL DEFAULT 0)");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}groups (group_id INTEGER PRIMARY KEY, group_type INTEGER NOT NULL DEFAULT 1,
+			group_name TEXT NOT NULL DEFAULT '')");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}user_group (group_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0,
+			group_leader INTEGER NOT NULL DEFAULT 0, user_pending INTEGER NOT NULL DEFAULT 1)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}forums (forum_id, forum_name) VALUES (2, 'Ogólne'), (3, 'Dla młodzieży')");
+		// phpBB's special groups (group_type 3) as installed, and two the administrator made:
+		// open (0) and closed (1).
+		$this->db->pdo->exec("INSERT INTO {$prefix}groups (group_id, group_type, group_name) VALUES
+			(1, 3, 'GUESTS'), (2, 3, 'REGISTERED'), (3, 3, 'REGISTERED_COPPA'), (4, 3, 'GLOBAL_MODERATORS'),
+			(5, 3, 'ADMINISTRATORS'), (6, 3, 'BOTS'), (7, 3, 'NEWLY_REGISTERED'), (" . self::GROUP_TRUSTED . ", 0, 'Stali bywalcy'),
+			(" . self::GROUP_TEAM . ", 1, 'Zespół redakcji')");
+		// The guest in GUESTS (as phpBB installs it); the author registered and trusted; the new
+		// user registered, newly registered, and only asking to join the trusted (pending).
+		$this->db->pdo->exec("INSERT INTO {$prefix}user_group (group_id, user_id, user_pending) VALUES
+			(1, 1, 0), (2, 2, 0), (" . self::GROUP_TRUSTED . ", 2, 0), (2, 3, 0), (7, 3, 0), (" . self::GROUP_TRUSTED . ", 3, 1)");
 		$this->db->pdo->exec("INSERT INTO {$prefix}users (user_id, username, user_email, user_ip, user_posts) VALUES
 			(1, 'Anonymous', '', '', 0), (2, 'Autorka', '" . self::USER_EMAIL . "', '" . self::USER_IP . "', 5), (3, 'Nowy', 'nowy@forum.example', '198.51.100.99', 0)");
 
@@ -476,6 +585,25 @@ class Board
 			foreach ($schema['KEYS'] as $name => $key)
 			{
 				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', (array) $key[1]) . ')');
+			}
+		}
+		foreach (array(verdict_times::class, queue_notice::class) as $class)
+		{
+			$later = new $class(new \phpbb\config\config(), $this->db, null, './', 'php', self::PREFIX);
+			$changes = $later->update_schema();
+			foreach ($changes['add_columns'] as $table => $columns)
+			{
+				foreach ($columns as $name => $definition)
+				{
+					$this->db->pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . self::column($name, $definition));
+				}
+			}
+			foreach (isset($changes['add_index']) ? $changes['add_index'] : array() as $table => $indexes)
+			{
+				foreach ($indexes as $name => $columns)
+				{
+					$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', $columns) . ')');
+				}
 			}
 		}
 	}
@@ -492,12 +620,24 @@ class Board
 		$columns = array();
 		foreach ($schema['COLUMNS'] as $name => $definition)
 		{
-			list($type, $default) = $definition;
-			$sql_type = preg_match('/^(VCHAR|MTEXT)/', $type) ? 'TEXT' : 'INTEGER';
-			$columns[] = $name . ' ' . $sql_type . ' NOT NULL DEFAULT ' . (is_int($default) ? $default : "'" . $default . "'");
+			$columns[] = self::column($name, $definition);
 		}
 		$columns[] = 'PRIMARY KEY (' . implode(', ', (array) $schema['PRIMARY_KEY']) . ')';
 		return 'CREATE TABLE ' . $table . ' (' . implode(', ', $columns) . ')';
+	}
+
+	/**
+	 * One column of phpBB's schema array as SQLite DDL.
+	 *
+	 * @param string            $name
+	 * @param array{0:string,1:int|string} $definition The type and the default.
+	 * @return string
+	 */
+	public static function column($name, array $definition)
+	{
+		list($type, $default) = $definition;
+		$sql_type = preg_match('/^(VCHAR|MTEXT)/', $type) ? 'TEXT' : 'INTEGER';
+		return $name . ' ' . $sql_type . ' NOT NULL DEFAULT ' . (is_int($default) ? $default : "'" . $default . "'");
 	}
 
 	/**
@@ -511,6 +651,6 @@ class Board
 		$this->submitter = new submitter($this->settings, $this->store, $this->forum, $this->transport, $this->applier);
 		$this->receiver = new receiver($this->settings, $this->store);
 		$this->deferred = new deferred_verdicts($this->applier, $this->forum);
-		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language);
+		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language, $this->user);
 	}
 }

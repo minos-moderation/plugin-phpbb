@@ -432,7 +432,7 @@ final class WebhookTest extends TestCase
 		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
 		$this->board->listener->show_queue_details($details);
 
-		self::assertStringContainsString('oceniono 3000 pierwszych znaków', $queue['post_row']['POST_SUBJECT']);
+		self::assertStringContainsString($this->board->language->lang('MINOS_MCP_TRUNCATED'), $queue['post_row']['POST_SUBJECT'], 'the note on the queue row');
 		self::assertTrue($details['post_data']['S_MINOS_TRUNCATED']);
 	}
 
@@ -501,6 +501,38 @@ final class WebhookTest extends TestCase
 			$this->board->listener->show_queue_details($details);
 			self::assertSame($masked, html_entity_decode(strip_tags($details['post_data']['MINOS_MASKED']), ENT_QUOTES, 'UTF-8'),
 				'the moderator sees the whole mask, title included');
+		}
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:int,2:string}>
+	 */
+	public function masksAndPolls(): array
+	{
+		return array(
+			'a mask of the text only' => array("Temat\n\nPytanie?\nTak\nNie\n\nTo jest ████████ słowo.", ITEM_APPROVED, pending_store::MASKED),
+			'a mask in an option'     => array("Temat\n\nPytanie?\n███\nNie\n\nTo jest brzydkie słowo.", ITEM_UNAPPROVED, pending_store::HELD),
+			'a mask in the question'  => array("Temat\n\n████████\nTak\nNie\n\nTo jest ████████ słowo.", ITEM_UNAPPROVED, pending_store::HELD),
+		);
+	}
+
+	/**
+	 * @dataProvider masksAndPolls
+	 */
+	public function testAMaskThatTouchesThePollIsLeftToAModeratorAndThePollIsNeverChanged(string $masked, int $visibility, string $status): void
+	{
+		$this->board->configure(array(settings::CENSORED => settings::CENSORED_PUBLISH));
+		$id = $this->board->posting('To jest brzydkie słowo.', 'post', array('title' => 'Temat',
+			'poll' => array('question' => 'Pytanie?', 'options' => array('Tak', 'Nie'))))['post_id'];
+
+		$this->board->deliver(self::verdict($id, 'ocenzurowane', array('ocenzurowany' => $masked)));
+
+		self::assertSame(array($visibility, $status), array((int) $this->board->post($id)['post_visibility'], $this->board->row($id)['status']));
+		$poll = $this->board->forum->poll_of($this->board->forum->load_post($id));
+		self::assertSame("Pytanie?\nTak\nNie", $poll, 'the extension never changes a poll');
+		if ($status === pending_store::HELD)
+		{
+			self::assertSame('mask_manual', $this->board->row($id)['error_code']);
 		}
 	}
 

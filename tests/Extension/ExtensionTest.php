@@ -7,6 +7,10 @@ use minos\moderation\ext;
 use minos\moderation\migrations\gateway_pause;
 use minos\moderation\migrations\install_data;
 use minos\moderation\migrations\install_schema;
+use minos\moderation\migrations\queue_notice;
+use minos\moderation\migrations\shared_pause;
+use minos\moderation\migrations\user_groups;
+use minos\moderation\migrations\verdict_times;
 use minos\moderation\service\settings;
 use PHPUnit\Framework\TestCase;
 
@@ -53,8 +57,10 @@ final class ExtensionTest extends TestCase
 		$config_text = new \phpbb\config\db_text();
 		$migration = new install_data($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$pause = new gateway_pause($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		$shared_pause = new shared_pause($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		$groups = new user_groups($config, new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
 		$modules = 0;
-		foreach (array_merge($migration->update_data(), $pause->update_data()) as $step)
+		foreach (array_merge($migration->update_data(), $pause->update_data(), $shared_pause->update_data(), $groups->update_data()) as $step)
 		{
 			list($tool, $arguments) = $step;
 			if ($tool === 'config.add')
@@ -81,12 +87,30 @@ final class ExtensionTest extends TestCase
 		self::assertSame(settings::CENSORED_PUBLISH, $settings->censored_mode());
 		self::assertSame(settings::HOLD, $settings->blocked_mode());
 		self::assertSame(array(), $settings->forum_ids());
+		self::assertSame(array(), $settings->group_ids(), 'every group, as before the setting');
+		self::assertSame(array('\minos\moderation\migrations\shared_pause'), user_groups::depends_on());
+		self::assertSame(array('\minos\moderation\migrations\user_groups'), verdict_times::depends_on());
+		self::assertSame(array('\minos\moderation\migrations\verdict_times'), queue_notice::depends_on());
 		self::assertNull($settings->pause(time()), 'no pause of the gateway yet');
 		self::assertTrue($pause->effectively_installed());
 		self::assertSame(array('\minos\moderation\migrations\install_data'), gateway_pause::depends_on());
+		self::assertTrue($shared_pause->effectively_installed());
+		self::assertSame(array('\minos\moderation\migrations\gateway_pause'), shared_pause::depends_on());
 		self::assertSame(2, $modules, 'a category and the settings page');
 		self::assertSame(array('\minos\moderation\migrations\install_schema'), install_data::depends_on());
 		self::assertSame(array('\phpbb\db\migration\data\v330\v330'), install_schema::depends_on());
+	}
+
+	public function testTheVerdictTimeColumnIsAddedAndTakenBackWithTheExtensionsData(): void
+	{
+		$migration = new verdict_times(new \phpbb\config\config(), new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+
+		self::assertSame(array('received_at' => array('TIMESTAMP', 0)), $migration->update_schema()['add_columns']['phpbb_minos_pending']);
+		self::assertSame(array('received_at'), $migration->revert_schema()['drop_columns']['phpbb_minos_pending']);
+
+		$notice = new queue_notice(new \phpbb\config\config(), new \minos\moderation\tests\Fake\SqliteDriver(':memory:'), null, './', 'php', 'phpbb_');
+		self::assertSame(array('announced' => array('BOOL', 0)), $notice->update_schema()['add_columns']['phpbb_minos_pending']);
+		self::assertSame(array('announced'), $notice->revert_schema()['drop_columns']['phpbb_minos_pending']);
 	}
 
 	public function testAnUnrecognisedStoredValueNeverPublishesByItself(): void

@@ -28,6 +28,9 @@ services:
             - '%tables.topics%'
             - '%tables.forums%'
             - '%tables.users%'
+            - '%tables.groups%'
+            - '%tables.user_group%'
+            - '%tables.poll_options%'
 
     minos.moderation.transport:
         class: minos\moderation\service\curl_transport
@@ -70,6 +73,7 @@ services:
             - '@minos.moderation.submitter'
             - '@auth'
             - '@language'
+            - '@user'
         tags:
             - { name: event.listener }
 
@@ -95,6 +99,7 @@ services:
         arguments:
             - '@minos.moderation.settings'
             - '@minos.moderation.store'
+            - '@minos.moderation.forum'
             - '@request'
             - '@template'
             - '@language'

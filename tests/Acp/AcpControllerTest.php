@@ -68,6 +68,34 @@ final class AcpControllerTest extends TestCase
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SETTINGS_UPDATED'));
 	}
 
+	public function testTheChosenGroupsAreStoredAndShown(): void
+	{
+		$this->submit($this->form(array('minos_groups' => array((string) Board::GROUP_TRUSTED, (string) Board::GROUP_REGISTERED))));
+
+		self::assertTrue($this->template->vars['S_MINOS_SAVED'], (string) $this->template->vars['ERROR_MSG']);
+		$settings = new settings($this->board->config, $this->board->config_text);
+		self::assertSame(array(Board::GROUP_TRUSTED, Board::GROUP_REGISTERED), $settings->group_ids());
+		self::assertFalse($this->template->vars['S_MINOS_ALL_GROUPS']);
+		$selected = array();
+		foreach ($this->template->blocks['minos_groups'] as $option)
+		{
+			if ($option['S_SELECTED'])
+			{
+				$selected[] = $option['VALUE'];
+			}
+		}
+		sort($selected);
+		self::assertSame(array(Board::GROUP_REGISTERED, Board::GROUP_TRUSTED), $selected);
+		self::assertCount(9, $this->template->blocks['minos_groups'], 'every group of the board');
+		$labels = array_column($this->template->blocks['minos_groups'], 'LABEL', 'VALUE');
+		self::assertSame(array(Board::GROUP_TEAM, Board::GROUP_TRUSTED), array_slice(array_keys($labels), -2), 'the administrator\'s groups after phpBB\'s own');
+		self::assertSame($this->board->language->lang('MINOS_GROUP_OPEN', 'Stali bywalcy'), $labels[Board::GROUP_TRUSTED], 'an open group is marked');
+		self::assertSame('Zespół redakcji', $labels[Board::GROUP_TEAM], 'a closed one is not');
+
+		$this->submit($this->form(array('minos_groups' => array())));
+		self::assertSame(array(), (new settings($this->board->config, $this->board->config_text))->group_ids(), 'none chosen again: every group');
+	}
+
 	public function testTheKeyAndTheSecretAreNeverShownBeyondAPrefix(): void
 	{
 		$this->submit($this->form(array('minos_api_key' => self::NEW_KEY, 'minos_webhook_secret' => self::NEW_SECRET)));
@@ -104,6 +132,7 @@ final class AcpControllerTest extends TestCase
 			'an unknown failure mode'     => array(array('minos_fail_mode' => 'fail-maybe'), 'MINOS_ERROR_CHOICE'),
 			'a timeout below the TTL'     => array(array('minos_timeout_min' => '10'), 'MINOS_ERROR_TIMEOUT'),
 			'a timeout under 20 minutes'  => array(array('minos_timeout_min' => '19'), 'MINOS_ERROR_TIMEOUT'),
+			'a group the board has not'   => array(array('minos_groups' => array('2', '999')), 'MINOS_ERROR_GROUPS'),
 		);
 	}
 
@@ -214,6 +243,8 @@ final class AcpControllerTest extends TestCase
 
 	public function testASpentDailyLimitIsShownWithItsHourUntilTheNextAcceptance(): void
 	{
+		// A day's wait for a verdict: the post outlasts the limit and is sent again after it.
+		$this->board->configure(array(settings::TIMEOUT_MIN => 1440));
 		$this->board->transport->refuse(429, 'limit_dobowy_klucza', 36000);
 		$until = time() + 36000;
 		$this->board->posting('Wpis po wyczerpaniu limitu dobowego.');
@@ -230,12 +261,46 @@ final class AcpControllerTest extends TestCase
 			self::assertStringNotContainsString($never, $message, 'never the key, the request or the gateway\'s body');
 		}
 
-		$this->board->posting('Wpis przyjęty po odnowieniu limitu.');
+		// The limit renews: the cron task sends the post again, and the gateway takes it.
+		$this->board->sweeper()->sweep($until + 1);
+		self::assertCount(2, $this->board->transport->requests);
 		$this->template = new MemoryTemplate();
 		$this->show(new FormRequest());
 
 		self::assertFalse($this->template->vars['S_MINOS_PAUSE'], 'the first 202 clears it');
 		self::assertSame('', $this->template->vars['MINOS_PAUSE']);
+	}
+
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function failureModes(): array
+	{
+		return array('fail-closed' => array(settings::FAIL_CLOSED), 'fail-open' => array(settings::FAIL_OPEN));
+	}
+
+	/**
+	 * @dataProvider failureModes
+	 */
+	public function testSavingTheSettingsEndsThePauseSoANewKeyIsTriedAtOnce(string $mode): void
+	{
+		// The free key's daily limit is spent: the gateway says come back in 10 hours. The
+		// administrator enters a paid key; without this every post would get the failure mode
+		// (fail-open: published unassessed) until then.
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+		$this->board->transport->refuse(429, 'limit_dobowy_klucza', 36000);
+		$this->board->posting('Wpis, który wyczerpał limit dobowy.');
+		self::assertNotNull($this->board->settings->pause(time()));
+
+		$this->submit($this->form(array('minos_api_key' => self::NEW_KEY, 'minos_fail_mode' => $mode)));
+
+		self::assertTrue($this->template->vars['S_MINOS_SAVED']);
+		self::assertFalse($this->template->vars['S_MINOS_PAUSE'], 'the page no longer shows it');
+		$id = $this->board->posting('Wpis po zmianie klucza.')['post_id'];
+		self::assertCount(2, $this->board->transport->requests, 'the next post is sent');
+		self::assertSame(self::NEW_KEY, $this->board->transport->requests[1]['headers']['X-Gateway-Key']);
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'held for its verdict, never published unassessed');
 	}
 
 	public function testAnOverloadedGatewayIsShownAsSuch(): void
@@ -247,6 +312,32 @@ final class AcpControllerTest extends TestCase
 
 		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
 		self::assertSame($this->board->language->lang('MINOS_PAUSE_OVERLOAD', gmdate('H:i', $this->board->settings->pause(time())['until'])),
+			$this->template->vars['MINOS_PAUSE']);
+	}
+
+	/**
+	 * @return array<string,array{0:int,1:string,2:string}>
+	 */
+	public function shortPauses(): array
+	{
+		return array(
+			'the key\'s minute limit'  => array(429, 'limit_minutowy_klucza', 'MINOS_PAUSE_KEY'),
+			'an unavailable gateway'   => array(503, 'kolejka_niedostepna', 'MINOS_PAUSE_UNAVAILABLE'),
+		);
+	}
+
+	/**
+	 * @dataProvider shortPauses
+	 */
+	public function testAShortPauseIsShownWithItsHour(int $status, string $code, string $key): void
+	{
+		$this->board->transport->refuse($status, $code, 90);
+		$this->board->posting('Wpis w czasie przerwy.');
+
+		$this->show(new FormRequest());
+
+		self::assertTrue($this->template->vars['S_MINOS_PAUSE']);
+		self::assertSame($this->board->language->lang($key, gmdate('H:i', $this->board->settings->pause(time())['until'])),
 			$this->template->vars['MINOS_PAUSE']);
 	}
 
@@ -324,7 +415,7 @@ final class AcpControllerTest extends TestCase
 
 	private function show(FormRequest $request, ?\phpbb\controller\helper $helper = null): void
 	{
-		$controller = new acp($this->board->settings, $this->board->store, $request, $this->template, $this->board->language,
+		$controller = new acp($this->board->settings, $this->board->store, $this->board->forum, $request, $this->template, $this->board->language,
 			$this->board->log, new \phpbb\user(), $helper ?: new \phpbb\controller\helper(), './', 'php');
 		$controller->display('index.php?i=minos');
 	}

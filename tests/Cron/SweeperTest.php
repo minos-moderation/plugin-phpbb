@@ -5,6 +5,7 @@ namespace minos\moderation\tests\Cron;
 use minos\moderation\cron\sweeper;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
+use minos\moderation\service\submitter;
 use minos\moderation\tests\Fake\Board;
 use minos\moderation\tests\Fake\RecordingTransport;
 use PHPUnit\Framework\TestCase;
@@ -127,11 +128,72 @@ final class SweeperTest extends TestCase
 		self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
 	}
 
+	/**
+	 * @return array<string,array{0:int|null,1:string}>
+	 */
+	public function answersThatStopARun(): array
+	{
+		return array(
+			'a 503'            => array(503, 'kolejka_niedostepna'),
+			'a full queue'     => array(429, 'kolejka_pelna'),
+			'the minute limit' => array(429, 'limit_minutowy_klucza'),
+			'no answer at all' => array(null, 'network'),
+		);
+	}
+
+	/**
+	 * @dataProvider answersThatStopARun
+	 */
+	public function testAfterTheFirstAnswerThatAsksToWaitARunSendsNoFurtherBatch(?int $status, string $code): void
+	{
+		// Audit C-22, the other way round: a run used to send every batch after a 503, up to
+		// five requests of 10 seconds each.
+		$this->gateway->refuse(503, 'kolejka_niedostepna');
+		$now = time();
+		$ids = array();
+		for ($i = 0; $i < 45; $i++)
+		{
+			$ids[] = $this->board->posting('Testowy wpis numer ' . $i . '.')['post_id'];
+		}
+		self::assertCount(1, $this->gateway->requests, 'the first refusal paused sending');
+
+		if ($status === null)
+		{
+			$this->gateway->script[] = null;
+		}
+		else
+		{
+			$this->gateway->refuse($status, $code);
+		}
+		$this->board->sweeper()->sweep($now + 61);
+
+		self::assertCount(2, $this->gateway->requests, 'one batch, then no further one');
+		self::assertCount(submitter::MAX_ITEMS, $this->gateway->items(1));
+		$untouched = 0;
+		foreach ($ids as $id)
+		{
+			$row = $this->board->row($id);
+			self::assertSame(pending_store::QUEUED, $row['status']);
+			$untouched += ($row['attempts'] === '0') ? 1 : 0;
+		}
+		self::assertSame(45 - 1 - submitter::MAX_ITEMS, $untouched, 'the rest was never sent');
+
+		$this->board->sweeper()->sweep($now + 61 + 30);
+		self::assertCount(2, $this->gateway->requests, 'nothing during the new pause');
+
+		$this->board->sweeper()->sweep($now + 61 + 61);
+		self::assertCount(5, $this->gateway->requests, 'after it, batches of 20, 20 and 5');
+		foreach ($ids as $id)
+		{
+			self::assertSame(pending_store::PENDING, $this->board->row($id)['status']);
+		}
+	}
+
 	public function testSwitchedOffTheTaskIsIdleAndHeldPostsWaitForAModerator(): void
 	{
+		$waiting = $this->board->posting('Pierwszy testowy wpis.')['post_id'];
 		$this->gateway->refuse(503, 'kolejka_niedostepna');
-		$retrying = $this->board->posting('Pierwszy testowy wpis.')['post_id'];
-		$waiting = $this->board->posting('Drugi testowy wpis.')['post_id'];
+		$retrying = $this->board->posting('Drugi testowy wpis.')['post_id'];
 		$this->board->configure(array(settings::ENABLED => 0, settings::FAIL_MODE => settings::FAIL_OPEN));
 		$sweeper = $this->board->sweeper();
 

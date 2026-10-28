@@ -98,6 +98,13 @@
 			<!-- IF S_MINOS_ALL_FORUMS --><br /><span>{L_MINOS_ALL_FORUMS}</span><!-- ENDIF -->
 		</dd>
 	</dl>
+	<dl>
+		<dt><label for="minos_groups">{L_MINOS_GROUPS}{L_COLON}</label><br /><span>{L_MINOS_GROUPS_EXPLAIN}</span></dt>
+		<dd>
+			<select id="minos_groups" name="minos_groups[]" multiple="multiple" size="8"><!-- BEGIN minos_groups --><option value="{minos_groups.VALUE}"<!-- IF minos_groups.S_SELECTED --> selected="selected"<!-- ENDIF -->>{minos_groups.LABEL}</option><!-- END minos_groups --></select>
+			<!-- IF S_MINOS_ALL_GROUPS --><br /><span>{L_MINOS_ALL_GROUPS}</span><!-- ENDIF -->
+		</dd>
+	</dl>
 </fieldset>
 
 <fieldset class="submit-buttons">
@@ -107,6 +114,15 @@
 </fieldset>
 
 </form>
+
+<h2>{L_MINOS_STATS}</h2>
+<p>{L_MINOS_STATS_EXPLAIN}</p>
+<!-- IF S_MINOS_STATS -->
+<!-- IF MINOS_STATS_WAIT --><p>{MINOS_STATS_WAIT}</p><!-- ENDIF -->
+<p>{MINOS_STATS_VERDICTS}</p>
+<!-- ELSE -->
+<p>{L_MINOS_STATS_EMPTY}</p>
+<!-- ENDIF -->
 
 <h2>{L_MINOS_RECENT}</h2>
 <p>{MINOS_RECENT_EXPLAIN}</p>

@@ -4,8 +4,9 @@ Rozszerzenie phpBB 3.3, które przed publikacją wysyła nowe posty do bramy Wer
 (usługa Minos) i stosuje werdykt, który brama odsyła podpisanym webhookiem: publikuje post,
 publikuje go z zamaskowanymi fragmentami albo zostawia w kolejce do zatwierdzenia.
 
-> **Stan:** trasa B2B bramy nie jest jeszcze otwarta produkcyjnie. Do czasu jej otwarcia
-> rozszerzenie można uruchomić z atrapą bramy (zob. `docs/development.md`).
+> **Stan:** trasa B2B bramy jest otwarta produkcyjnie od 25 października 2026 r. Klucz i
+> sekret webhooka wydaje operator bramy. Bez klucza rozszerzenie można wypróbować z atrapą
+> bramy (zob. `docs/development.md`).
 
 ## Wymagania
 
@@ -33,6 +34,23 @@ Paczka zawiera tylko to, co ładuje phpBB, oraz źródła dołączonej bibliotek
 testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; własny
 `composer.json` rozszerzenia zostaje, bo bez niego phpBB nie zainstaluje rozszerzenia.
 
+## Aktualizacja
+
+Nową wersję instaluj zawsze w tej kolejności:
+
+1. **Dostosuj → Zarządzaj rozszerzeniami → „Minos — moderacja postów” → Wyłącz** (nie „Usuń
+   dane”: to usunęłoby zapisane werdykty, ustawienia, klucz i sekret).
+2. Zastąp katalog `ext/minos/moderation/` zawartością nowej paczki (usuń stary katalog i
+   rozpakuj nową paczkę na jego miejsce).
+3. **Włącz** rozszerzenie: phpBB uruchamia wtedy migracje nowej wersji (nowe ustawienia i
+   kolumny tabeli rozszerzenia). Ustawienia, klucz i sekret zostają.
+
+Nie podmieniaj plików włączonego rozszerzenia: phpBB nie uruchomi wtedy migracji, a kod nowej
+wersji odwoła się do kolumn, których nie ma w bazie (np. przy doręczeniu werdyktu na webhook),
+i zakończy się błędem bazy danych. W czasie aktualizacji, gdy rozszerzenie jest wyłączone,
+webhook odpowiada `404` (brama ponawia doręczenie), a wstrzymane posty czekają w kolejce; co
+dzieje się z nimi po ponownym włączeniu — patrz „Wyłączenie”.
+
 ## Ustawienia
 
 | Ustawienie | Domyślnie | Znaczenie |
@@ -41,12 +59,13 @@ testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; w�
 | Adres bramy | `https://gateway.wergiliusz.app` | Tylko `https://`. `http://` jest dozwolone wyłącznie dla `localhost` / `127.0.0.1` (testy z atrapą bramy). |
 | Klucz API | — | Klucz `wgb2b_…`. Strona pokazuje tylko jego początek; puste pole zachowuje zapisany klucz. |
 | Sekret webhooka | — | Sekret podany raz, razem z kluczem. Strona pokazuje tylko jego początek; puste pole zachowuje zapisany sekret. Bez sekretu każde doręczenie jest odrzucane. |
-| Profil oceny | `forum_adult` | `forum_adult` (forum dla dorosłych) albo `forum_teen` (forum dla młodzieży, ocena surowsza). Profil musi być dozwolony dla klucza. |
+| Profil oceny | `forum_adult` | `forum_adult` („Forum dla dorosłych”) albo `forum_teen` („Forum dla dzieci i młodzieży”, ocena surowsza). Profil musi być dozwolony dla klucza. |
 | Tryb awarii | **fail-closed** | Co zrobić z postem bez werdyktu — patrz „Tryb awarii”. |
 | Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
 | Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
+| Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. Wybieraj grupy, z których użytkownik nie wystąpi sam (specjalne grupy phpBB, zamknięte, ukryte): z grupy otwartej członek może wystąpić w swoim panelu i od tej chwili pisać bez oceny — lista w ustawieniach oznacza takie grupy. |
 
 Klucz i sekret są przechowywane w tabeli `config_text` phpBB, która nie trafia do pamięci
 podręcznej ładowanej przy każdej stronie. Nie pojawiają się w żadnym dzienniku ani
@@ -67,22 +86,28 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
 
 1. Użytkownik wysyła nowy temat lub odpowiedź. Rozszerzenie kieruje post do kolejki do
    zatwierdzenia (autor widzi zwykły komunikat phpBB o poście czekającym na akceptację) i
-   od razu wysyła go do bramy.
+   od razu wysyła go do bramy — chyba że trwa przerwa w wysyłaniu po odmowie bramy (patrz
+   „Tryb awarii”): wtedy post wyśle zadanie cron. Autor czeka na odpowiedź bramy najwyżej
+   10 sekund; jeśli jej nie ma, post czeka w kolejce na ponowienie.
 2. Brama przyjmuje post (`202`) i ocenia go w tle — dla kluczy darmowych nawet do 15 minut.
 3. Werdykt przychodzi na adres webhooka, podpisany sekretem. Rozszerzenie sprawdza podpis
    (niepodpisane, sfałszowane i przeterminowane doręczenia są odrzucane), odpowiada od razu
-   i dopiero potem stosuje werdykt:
+   i dopiero potem, w tym samym żądaniu webhooka, stosuje werdykt (na serwerze z PHP-FPM
+   brama ma wtedy już odpowiedź). Publikacja wysyła przy tym zwykłe powiadomienia phpBB;
+   e-maile z nimi phpBB domyślnie odkłada do swojej kolejki e-maili, a gdy kolejka jest
+   wyłączona (rozmiar paczki e-maili 0), wysyła je w tym żądaniu:
 
    | Werdykt | Post do 3000 znaków | Post dłuższy (oceniony tylko początek) |
    |---|---|---|
    | `bezpieczne` | publikacja | tryb awarii, jak przy `nieocenione` |
-   | `ocenzurowane` | publikacja tekstu z zamaskowanymi fragmentami (bez formatowania; oryginał zostaje w tabeli rozszerzenia) albo kolejka — wg ustawienia; bez zamaskowanego tekstu zawsze kolejka | zawsze kolejka |
+   | `ocenzurowane` | publikacja tekstu z zamaskowanymi fragmentami (bez formatowania; oryginał zostaje w tabeli rozszerzenia przez 30 dni, potem jest usuwany) albo kolejka — wg ustawienia; bez zamaskowanego tekstu zawsze kolejka | zawsze kolejka |
    | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia | tak samo |
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
-   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł wysłany razem z
-   postem został nietknięty (rozszerzenie nigdy nie zmienia tytułu), a wysłany tekst jest
+   tekst wysłany do bramy i różni się od niego wyłącznie znakami `█`, tytuł i ankieta
+   wysłane razem z postem zostały nietknięte (rozszerzenie nigdy nie zmienia tytułu ani
+   ankiety), a wysłany tekst jest
    dokładnie tym, co napisał autor (post bez formatowania BBCode, cytatów i atrybutów —
    inaczej publikacja zmieniłaby więcej niż zamaskowane słowa). W każdym innym wypadku post
    zostaje w kolejce z notatką „zamaskowany tekst wymaga ręcznego zastosowania”, a
@@ -91,20 +116,30 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    bazie. Jeśli zapis się nie uda, post zostaje w kolejce — oryginalny tekst nigdy nie
    zostaje opublikowany zamiast zamaskowanego.
 4. Każda decyzja rozszerzenia trafia do dziennika moderatorów (autor wpisu: Anonymous, opis:
-   „Minos …”). Powiadomienia o nowym poście (dla obserwujących temat i forum, zakładki,
+   „Minos …”, z tematem postu; treści postu tam nie ma). Te wpisy należą do forum: nie
+   znikają po 30 dniach razem z danymi rozszerzenia (patrz „Zadanie cron”), tylko zostają w
+   dzienniku jak każdy inny jego wpis, według zasad forum. Powiadomienia o nowym poście (dla obserwujących temat i forum, zakładki,
    cytowanych) wychodzą raz, w chwili publikacji przez rozszerzenie; jeśli post zatwierdził
    moderator, powiadamia wyłącznie phpBB.
 
-   Uwaga: dla każdego wstrzymanego postu phpBB od razu, jeszcze przed werdyktem, wysyła
-   moderatorom swoje zwykłe powiadomienie (także e-mailem, jeśli mają je włączone), że post
-   lub temat czeka w kolejce. Gdy rozszerzenie opublikuje post, to powiadomienie zostaje
-   wycofane z listy powiadomień, ale wysłanego e-maila nie da się cofnąć. Moderatorzy, którym
-   to przeszkadza, mogą wyłączyć e-maile „post/temat czeka na zatwierdzenie” w swoim panelu.
+   Powiadomienie phpBB „post/temat czeka na zatwierdzenie” o poście, który rozszerzenie
+   wstrzymało do oceny, pojawia się od razu tylko na liście powiadomień na forum: e-mail z
+   nim (i inne wiadomości) rozszerzenie wstrzymuje. Gdy rozszerzenie opublikuje post,
+   powiadomienie znika z listy, a e-mail nie wychodzi wcale. Gdy zostawi post w kolejce dla
+   moderatora (werdykt, tryb awarii fail-closed, brak tekstu do oceny, post zmieniony w
+   czasie oceny), moderatorzy dostają to powiadomienie jeszcze raz, tym razem także e-mailem
+   (jeśli mają je włączone) — jeden raz na post: gdy post wróci do kolejki ponownie (np.
+   spóźniony werdykt, poprawka), powiadomienie zostaje na liście, a drugi e-mail nie wychodzi. O postach, których rozszerzenie nie wstrzymuje,
+   phpBB powiadamia jak zwykle. Jeśli wyłączysz ocenianie w ustawieniach, gdy posty czekają
+   na werdykt, moderatorzy dostają wtedy e-mail o każdym z nich (od tej chwili decydują o
+   nich sami). Po wyłączeniu rozszerzenia w menedżerze rozszerzeń e-mail o nich nie wyjdzie:
+   posty widać w kolejce i na liście powiadomień.
 
 Ten sam werdykt doręczony dwa razy jest stosowany raz. Jeśli moderator zatwierdził lub
 usunął post, zanim przyszedł werdykt, decyzja moderatora zostaje, a werdykt jest pomijany.
-Jeśli autor poprawi post, który czeka na werdykt (także sam tytuł tematu), post zostaje w
-kolejce i jest oceniany od nowa; werdykt dla poprzedniej wersji nie zostanie zastosowany.
+Jeśli autor albo moderator poprawi post, który czeka na werdykt (także sam tytuł tematu albo
+ankietę), post zostaje w kolejce i jest oceniany od nowa jako `phpbb:<numer>.<wersja>`;
+werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 ## Tryb awarii
 
@@ -122,21 +157,52 @@ tryb awarii:
   przyjdzie później, rozszerzenie go zastosuje: `zablokowane` cofa post do kolejki (albo
   usuwa go miękko, zgodnie z ustawieniem), `ocenzurowane` maskuje go albo cofa do kolejki,
   `bezpieczne` potwierdza publikację. Jeśli jednak moderator w międzyczasie coś z postem
-  zrobił (usunął, przywrócił, zatwierdził) albo post został poprawiony, zostaje decyzja
-  człowieka.
+  zrobił (usunął, przywrócił, zatwierdził), zostaje decyzja człowieka.
 
 Post zostawiony w kolejce przez tryb fail-closed również przyjmie spóźniony werdykt, o ile
 moderator nie zdążył go rozpatrzyć.
 
-Gdy brama jest przeciążona (`429`) lub chwilowo niedostępna (`503`, brak połączenia),
-rozszerzenie ponawia wysyłkę po czasie wskazanym przez bramę (albo po 1, 2, 4… minutach).
-Jeśli brama wskazuje czas późniejszy niż koniec oczekiwania na werdykt (np. po wyczerpaniu
-dziennego limitu klucza — do końca doby), post od razu obsługuje tryb awarii. Wyczerpany
-dzienny limit klucza i przeciążenie bramy widać na stronie ustawień jako komunikat z
-godziną, do której brama nie przyjmuje postów; znika po pierwszym przyjętym poście.
+Poprawka postu, na który werdykt nie nadszedł w czasie oczekiwania — opublikowanego przez
+tryb fail-open albo zostawionego w kolejce przez fail-closed — cofa go do kolejki do
+zatwierdzenia (także poprawka moderatora), a rozszerzenie ocenia go od nowa jako
+`phpbb:<numer>.<wersja>`; spóźniony werdykt dla poprzedniej wersji nie jest już stosowany.
+Poprawka postu opublikowanego bez oceny po odpowiedzi `nieocenione` albo po odmowie bramy
+nie jest oceniana (patrz „Ograniczenia”).
+
+Gdy brama odmawia z powodu limitów (`429`: limit klucza na minutę, na dobę lub zapytań w
+toku, wspólny limit wszystkich kluczy, pełna kolejka) albo jest chwilowo niedostępna (`503`,
+brak połączenia), rozszerzenie przestaje wysyłać posty do czasu wskazanego przez bramę (bez
+takiego wskazania — na minutę). W tym czasie nowe posty czekają w kolejce i wyśle je zadanie
+cron, a zadanie cron po pierwszej takiej odpowiedzi nie wysyła kolejnych paczek. Każda
+odmowa z powodu limitów klucza zużywa jego pulę zapytań, więc zamiast odmowy dla każdego
+postu jest jedna. Post, którego dotyczyła odmowa, jest ponawiany po czasie wskazanym przez
+bramę (albo po 1, 2, 4… minutach). Jeśli przerwa kończy się później niż czas oczekiwania na
+werdykt (np. po wyczerpaniu dziennego limitu klucza — do końca doby), post od razu obsługuje
+tryb awarii, bez wysyłania. Przerwę widać na stronie ustawień jako komunikat z powodem i
+godziną, do której rozszerzenie nie wysyła postów; znika po pierwszym przyjętym poście.
+Zapisanie ustawień kończy przerwę: po zmianie klucza (np. na płatny) albo adresu bramy
+zapisz ustawienia, aby spróbować od razu — następny post zostanie wysłany (jeśli brama nadal
+odmawia, przerwa wraca po tej jednej odmowie).
 Gdy brama odrzuca żądanie z innego powodu (np. nieznany klucz, brak webhooka, niedozwolony
 profil), ponawianie nie pomoże: posty obsługuje tryb awarii, a kod błędu trafia do
 dziennika błędów phpBB i na stronę ustawień, z krótkim objaśnieniem.
+
+Dokładnie: ponawiane są odpowiedź `429` (z każdym kodem), każda odpowiedź `5xx`, brak
+odpowiedzi (błąd połączenia albo przekroczone 10 sekund) i odpowiedź `2xx`, która nie
+przyjmuje każdego wysłanego postu (brak go w polu `przyjete`, także odpowiedź `2xx` spoza
+bramy, np. strona logowania serwera pośredniczącego). Każda inna odpowiedź — `3xx` (np.
+przekierowanie) i `4xx` inne niż `429`, także `408` — jest traktowana jak błąd konfiguracji.
+Gdy błąd dotyczy jednego postu z paczki (pole `element`), tryb awarii obsługuje tylko ten
+post, a pozostałe są wysyłane ponownie bez niego.
+
+## Kopia testowa forum
+
+Nie wpisuj klucza i sekretu produkcyjnego forum w jego kopii testowej (np. na serwerze
+deweloperskim). Brama odsyła werdykty na adres webhooka zapisany przy kluczu, czyli na forum
+produkcyjne, a kopia ma te same numery postów: werdykt dla postu z kopii może trafić na
+czekający post o tym samym numerze i przerwać jego ocenę (post zostaje wtedy w kolejce dla
+moderatora), a każde zapytanie kopii zużywa limity klucza produkcyjnego. Poproś operatora o
+osobny klucz (i sekret) dla kopii testowej.
 
 ## Co jest wysyłane, a co nigdy
 
@@ -148,9 +214,11 @@ Do bramy trafia wyłącznie:
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
   `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
-  tytułem tematu i pustym wierszem (tytuł mieści się w tych 3000 znakach); odpowiedź —
-  własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam tytuł, bez tekstu postu, nie
-  jest wysyłany: taki post obsługuje od razu tryb awarii (patrz niżej);
+  tytułem tematu i pustym wierszem, a jeśli temat ma ankietę — także jej pytaniem i
+  opcjami (każda w osobnym wierszu) i pustym wierszem (tytuł i ankieta mieszczą się w tych
+  3000 znakach); odpowiedź — własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam
+  tytuł, bez tekstu postu ani ankiety, nie jest wysyłany: taki post obsługuje od razu tryb
+  awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
   pierwszy post autora (dla gości — nie).
@@ -166,9 +234,16 @@ przekierowaniem.
 ## Których postów rozszerzenie nie wstrzymuje
 
 - postów administratorów i moderatorów danego forum;
-- postów w forach, które i tak wymagają zatwierdzania (użytkownik bez uprawnienia „może
-  pisać bez zatwierdzania”): takie posty rozpatruje moderator, a ich tekst nie jest nigdzie
-  wysyłany, bo werdykt niczego by nie zmienił;
+- postów, które phpBB i tak kieruje do kolejki do zatwierdzenia (użytkownik nie ma w danym
+  forum uprawnienia „może pisać bez zatwierdzania”): rozpatruje je moderator w kolejce phpBB
+  **bez werdyktu Minosa**, a ich tekst nie jest nigdzie wysyłany. W domyślnej konfiguracji
+  phpBB 3.3 dotyczy to nowo zarejestrowanych użytkowników: konto, które ma mniej postów niż
+  limit phpBB dla nowych użytkowników (domyślnie 3), należy do grupy nowo zarejestrowanych
+  (`NEWLY_REGISTERED`), a ta w forum utworzonym przy instalacji ma rolę „nowy użytkownik”,
+  która nie pozwala pisać bez zatwierdzania (sprawdzone w źródle phpBB 3.3; nazwy w panelu
+  zależą od pakietu językowego). To zwykle pierwsze posty nowych kont, w tym spam:
+  moderator ocenia je bez pomocy Minosa;
+- postów użytkowników spoza grup wybranych w ustawieniu „Grupy użytkowników”;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
 - odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
   załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z
@@ -182,6 +257,16 @@ przekierowaniem.
   sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
   awarii).
 
+## Czas do werdyktu i liczba werdyktów
+
+Strona ustawień pokazuje dla ostatnich 7 dni medianę (P50) i 95. percentyl (P95) czasu od
+przyjęcia postu przez bramę (odpowiedź `202`) do doręczenia werdyktu na webhook, liczbę
+werdyktów `bezpieczne`, `ocenzurowane`, `zablokowane` i `nieocenione` oraz liczbę postów, na
+które werdykt nie nadszedł w czasie oczekiwania. Liczby powstają z dwóch chwil zapisanych przy
+każdym poście w tabeli rozszerzenia (przyjęcie i doręczenie); nie zawierają treści postów ani
+klucza i nie wymagają żadnych dodatkowych zapytań do bramy. Po poprawce postu czekającego na
+werdykt liczy się tylko ocena nowej wersji.
+
 ## Wsparcie
 
 Gdy brama zaznaczy `wsparcie` (treść może świadczyć o samookaleczeniu lub kryzysie autora),
@@ -193,7 +278,12 @@ podstawa do kary.
 ## Zadanie cron
 
 Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie nadszedł w
-czasie, ponawia wysyłki i usuwa własne wpisy 30 dni po rozstrzygnięciu. Na forach o małym
+czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
+„poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
+wpisy 30 dni po rozstrzygnięciu: z wpisem znikają zapisany werdykt i oryginał zamaskowanego
+postu (to wszystkie dane, które rozszerzenie przechowuje o poście). Wpisy w dzienniku
+moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) zostają: to rejestr
+forum, przechowywany według zasad forum. Na forach o małym
 ruchu warto uruchamiać cron phpBB z systemu (`bin/phpbbcli.php cron:run`), bo cron
 wywoływany odsłonami stron może się opóźniać.
 
@@ -211,9 +301,23 @@ włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wrac
 postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
 
+## Usunięcie rozszerzenia
+
+Wyłączenie rozszerzenia w menedżerze rozszerzeń (**Wyłącz**) zostawia jego dane: patrz
+„Wyłączenie”. **Usuń dane** w menedżerze rozszerzeń cofa migracje rozszerzenia: usuwa jego
+tabelę (`minos_pending` — z zapisanymi werdyktami i oryginałami zamaskowanych postów), jego
+ustawienia (także klucz i sekret webhooka) i stronę w panelu administracji. Posty, które
+czekały w kolejce, zostają w kolejce phpBB dla moderatorów; posty opublikowane z maskowaniem
+zostają zamaskowane, a ich oryginałów nie da się już odzyskać z rozszerzenia. Wpisy w
+dzienniku moderatorów zostają. Na żywym forum phpBB nie zostało to jeszcze sprawdzone
+testem (opis wynika z migracji rozszerzenia i z kodu phpBB 3.3).
+
 ## Ograniczenia
 
-- Poprawki postów już opublikowanych nie są oceniane ponownie.
+- Poprawki postów opublikowanych po werdykcie (`bezpieczne`, publikacja z maskowaniem)
+  albo bez oceny po odpowiedzi `nieocenione` lub odmowie bramy nie są oceniane ponownie.
+  Od nowa oceniana jest tylko poprawka postu, który czeka na werdykt albo na który werdykt
+  nie nadszedł w czasie oczekiwania (patrz „Tryb awarii”).
 - Publikacja z maskowaniem zastępuje tekst postu zwykłym tekstem (bez formatowania), a
   indeks wyszukiwarki phpBB zachowuje słowa z oryginału.
 - Domeny linków są ustalane w przybliżeniu (bez pełnej listy sufiksów publicznych).

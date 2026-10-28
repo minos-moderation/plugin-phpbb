@@ -33,6 +33,7 @@ final class ListenerTest extends TestCase
 			'core.submit_post_end',
 			'core.mcp_queue_get_posts_modify_post_row',
 			'core.mcp_queue_approve_details_template',
+			'core.notification_manager_add_notifications',
 		), array_keys(listener::getSubscribedEvents()));
 		foreach (listener::getSubscribedEvents() as $method)
 		{
@@ -149,6 +150,53 @@ final class ListenerTest extends TestCase
 		self::assertSame(ITEM_APPROVED, $posted['visibility']);
 		self::assertNull($this->board->row($posted['post_id']));
 		self::assertSame(array(), $this->gateway->requests);
+	}
+
+	public function testAPostOfAUserOutsideTheChosenGroupsIsNeitherHeldNorSent(): void
+	{
+		// Audit probe P8 as the model: a post the extension does not cover leaves nothing.
+		// A newly registered user who may post without approval, while only the board's
+		// regulars are chosen (and his own request to join them still waits).
+		$this->board->configure(array(), array(settings::GROUPS => '[' . Board::GROUP_TRUSTED . ']'));
+
+		$posted = $this->board->posting('Wpis nowego użytkownika.', 'post', array('poster_id' => Board::NEW_USER));
+
+		self::assertSame(ITEM_APPROVED, $posted['visibility'], 'published as before');
+		self::assertArrayNotHasKey('force_approved_state', $posted['data']);
+		self::assertNull($this->board->row($posted['post_id']));
+		self::assertSame(array(), $this->gateway->requests, 'zero requests to the gateway');
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:int,2:bool}>
+	 */
+	public function groupChoices(): array
+	{
+		$trusted = '[' . Board::GROUP_TRUSTED . ']';
+		return array(
+			'none chosen: every group'                => array('', Board::NEW_USER, true),
+			'a member of the chosen group'            => array($trusted, Board::USER, true),
+			'a member of one of several'              => array('[' . Board::GROUP_TRUSTED . ',' . Board::GROUP_NEWLY_REGISTERED . ']', Board::NEW_USER, true),
+			'a request to join is no membership'      => array($trusted, Board::NEW_USER, false),
+			'a guest is in the guests\' group'        => array('[' . Board::GROUP_GUESTS . ']', ANONYMOUS, true),
+			'a guest is not a registered user'        => array('[' . Board::GROUP_REGISTERED . ']', ANONYMOUS, false),
+			'a damaged value: every group'            => array('grupy', Board::NEW_USER, true),
+			'ids that are not numbers: every group'   => array('["10"]', Board::NEW_USER, true),
+			'only groups deleted since: every group'  => array('[999]', Board::NEW_USER, true),
+		);
+	}
+
+	/**
+	 * @dataProvider groupChoices
+	 */
+	public function testOnlyMembersOfTheChosenGroupsAreHeldAndSent(string $stored, int $poster, bool $held): void
+	{
+		$this->board->configure(array(), array(settings::GROUPS => $stored));
+
+		$posted = $this->board->posting('Zwykły testowy wpis.', 'post', array('poster_id' => $poster));
+
+		self::assertSame($held ? ITEM_UNAPPROVED : ITEM_APPROVED, $posted['visibility']);
+		self::assertCount($held ? 1 : 0, $this->gateway->requests);
 	}
 
 	public function testAPostPhpbbQueuesForAModeratorAnywayIsNotSent(): void

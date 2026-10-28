@@ -1,6 +1,6 @@
 ---
 name: przeglad-bezpieczenstwa
-description: Pre-merge review of a PR to the Minos phpBB extension that touches the receiver, the submission, the listener, the cron task, the settings, the applier, the platform adapter or the migrations. Use once per such PR, before merge. Read-only; confirms findings by running code.
+description: Pre-merge review of a PR to the Minos phpBB extension that touches the receiver, the submission, the listener, the cron task, the settings, the applier, the platform adapter or the migrations. Use once per such PR, before merge. Read-only by instruction; Bash runs checks and probes, which confirm every finding.
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash
