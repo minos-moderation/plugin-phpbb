@@ -87,12 +87,17 @@ decision).
   `adm/style/event/acp_overall_header_body_before.html`), never a stored value. A fresh
   installation starts switched off. Finished rows - the original of a masked post, the
   verdict - are kept 30 days (D9.11), pruned by the cron task.
-- **A link or a title without text to assess is the failure mode** (the plugins' shared rule
-  D9.5): a post whose text is empty but which holds a link (`<URL>`, also with a blank text a
-  reader cannot see) or carries a title (a new topic, a reply's own subject) is held and
-  gets the failure mode at once, without a request; the MCP notes "brak tekstu do oceny"
-  (`error_code` `empty_text`). A reply with no text, no link and the default subject
-  (attachments only) is not held. A title is never sent alone.
+- **A post without text to assess is the failure mode** (the plugins' shared rules D9.5 and
+  F7 of client-php's `docs/plugin-behaviour.md`): every post the settings cover is held
+  (`listener::should_hold` no longer looks at the text), and one whose text sent would be
+  empty gets the failure mode at once, without a request; the MCP notes "brak tekstu do
+  oceny" (`error_code` `empty_text`). Empty means nothing a reader reads: only an image
+  (`IMG`, also `[img=WxH]`, which phpBB stores as an `IMG`), an inline attachment
+  (`ATTACHMENT`), a video (`FLASH`), a link with a blank label (`<URL>` whose text is blank),
+  formatting around nothing, or a title alone (a new topic, a reply's own subject). Before
+  F7 such a reply without a link or a title of its own was published unassessed, and an
+  image went to the gateway as its address. A title is never sent alone; an address a reader
+  sees (a bare one, `[url]X[/url]`) is text and is sent.
 - **Staff and phpBB's own queue are skipped.** Posts by administrators and the forum's
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`; by phpBB's
   defaults the newly registered users, see "phpBB APIs") is left to the moderators and not
@@ -136,7 +141,10 @@ decision).
   `clean_formatting()`, which puts a space where every tag sat: `zak[b]a[/b]zane` would reach
   the gateway as "zak a zane" (recorded in `tests/fixtures/phpbb-3.3/`). Inline formatting adds
   nothing between words; `QUOTE`, `LIST`, `LI`, `CODE`, `br` and `p` start and end a line (one
-  line break, or the author's own); `<s>`/`<e>` (the typed markup) are dropped. A stored text
+  line break, or the author's own); `<s>`/`<e>` (the typed markup) are dropped; `IMG`,
+  `ATTACHMENT` and `FLASH` add no text (`forum::MEDIA_ELEMENTS`: their content is an address
+  or a file name the reader does not read), and the `title`/`alt` attributes collected are
+  added only beside other text, never alone (F7). A stored text
   that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing. The XML
   parser is PHP's DOM, which phpBB 3.3 itself requires (its text formatter does).
 - **A refusal that outlasts the wait is the failure mode at once** (the plugins' shared rule
@@ -245,8 +253,8 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 |---|---|
 | `tests/Receiver` | Deliveries signed with `Signature::sign` through the controller: good → applied; wrong secret, stale, malformed, another body, an empty or short stored secret → `401`; switched off → `404`; not a payload → `400`; unknown id, other revision, repeat → `200` and nothing; every `kwalifikacja` and both failure modes; longer posts; a masked text that cannot be stored (SQLite triggers), or that touches the title; `wsparcie`; a moderator acting first; the answer before the application; the gateway's own signature vector. `LateVerdictTest`: the fail-open mark and every late verdict, and every change that makes it stand aside. `SignatureTraceTest`: on the gateway's signature vector, the clock 301 s off → the ACP names the clock, the body changed → the secret, no header → the header; the same empty `401` for every reason; nothing secret kept; forgotten by a delivery that passes and by a new secret. `NotificationTest`: every notification counted by kind, and the queue e-mail delivered through the fake manager's model of phpBB's delivery: none for a post held and published (also back in the queue after an edit), exactly one for a post left in the queue, phpBB's own for a post the extension does not hold. |
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
-| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole). |
-| `tests/Posting` | Which posts are held (a link without text: the failure mode at once; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
+| `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing; a bare or `[url]` address is text). |
+| `tests/Posting` | Which posts are held (every post covered; one without text to assess - each F7 fixture of the real formatter, in both modes - the failure mode at once and no request; an address a reader sees sent with its link; an image's title beside text only; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
 | `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
 | `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |

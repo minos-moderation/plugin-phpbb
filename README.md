@@ -156,9 +156,8 @@ werdykt dla poprzedniej wersji nie zostanie zastosowany.
 
 Minos nigdy nie zgaduje werdyktu. Gdy go nie ma — brama odpowiedziała `nieocenione`,
 werdykt nie nadszedł w wyznaczonym czasie, brama odrzuciła żądanie z powodu konfiguracji,
-oceniła tylko początek długiego postu, post ma link albo tytuł, ale nie ma tekstu do oceny,
-albo
-ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
+oceniła tylko początek długiego postu, post nie ma tekstu do oceny (np. sam obrazek,
+załącznik, link bez widocznego opisu albo sam tytuł) albo ocenianie jest włączone, ale brakuje klucza, sekretu lub poprawnego adresu bramy — decyduje
 tryb awarii:
 
 - **fail-closed** (domyślnie): post zostaje w kolejce do zatwierdzenia i czeka na
@@ -228,7 +227,10 @@ Do bramy trafia wyłącznie:
 - tekst postu: **pierwsze 3000 znaków**, razem z cytatami — każdy poprzedzony wierszem
   „Kasia napisał(a):” — bo oceniane jest wszystko, co post publikuje, a słowa ujęte w
   `[quote]` nie mogą ominąć moderacji; bez formatowania BBCode/HTML, ale z tekstem atrybutów
-  `title` i `alt` (tam też można ukryć słowa). Pierwszy post nowego tematu jest poprzedzony
+  `title` i `alt` (tam też można ukryć słowa), wysyłanym tylko obok innego tekstu. Adres
+  linku widoczny dla czytelnika (wklejony adres, `[url]adres[/url]`) jest tekstem i trafia do
+  bramy; adres obrazka (`[img]`), nazwa pliku wstawionego załącznika i adres filmu
+  (`[flash]`) nie — czytelnik widzi obrazek, plik albo film, a brama nie ocenia obrazów. Pierwszy post nowego tematu jest poprzedzony
   tytułem tematu i pustym wierszem, a jeśli temat ma ankietę — także jej pytaniem i
   opcjami (każda w osobnym wierszu) i pustym wierszem (tytuł i ankieta mieszczą się w tych
   3000 znakach); odpowiedź — własnym tematem, jeśli autor zmienił domyślny „Re: …”. Sam
@@ -260,17 +262,18 @@ przekierowaniem.
   moderator ocenia je bez pomocy Minosa;
 - postów użytkowników spoza grup wybranych w ustawieniu „Grupy użytkowników”;
 - postów, dla których inne rozszerzenie ustawiło już widoczność;
-- odpowiedzi bez tekstu do oceny, bez linku i bez własnego tematu (np. z samymi
-  załącznikami; sam cytat jest zwykłym postem: zostaje wstrzymany i oceniony). Post z
-  linkiem albo z tytułem (każdy nowy temat, odpowiedź z własnym tematem), ale bez tekstu do
-  oceny — także z samym formatowaniem wokół spacji, np. `[b] [/b]`, albo z linkiem o pustym,
-  niewidocznym opisie — jest wstrzymywany i od razu obsługuje go tryb awarii, bez wysyłania
-  czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”. Sam tytuł
-  nigdy nie jest wysyłany;
 - postów w forach spoza listy ustawień;
 - wszystkich postów, gdy ocenianie jest wyłączone (gdy jest włączone, ale brakuje klucza,
   sekretu lub poprawnego adresu bramy, nowe posty są wstrzymywane i od razu obsługuje je tryb
   awarii).
+
+Post bez tekstu do oceny jest wstrzymywany jak każdy inny i od razu obsługuje go tryb awarii,
+bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak tekstu do oceny”.
+Tak jest z postem, którego czytelnik widzi tylko obrazek (`[img]`, także `[img=…]`, nawet z
+podpisem), załącznik, film albo link bez widocznego opisu (`[url=…] [/url]`), z samym
+formatowaniem wokół spacji (np. `[b] [/b]`) i z nowym tematem albo odpowiedzią z własnym
+tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
+jest zwykłym tekstem: post zostaje wysłany i oceniony.
 
 ## Czas do werdyktu i liczba werdyktów
 

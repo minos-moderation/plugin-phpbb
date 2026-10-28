@@ -59,6 +59,14 @@ $corpus = array(
 	'plain-lines'          => "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\"",
 	'blank-bold'           => '[b] [/b]',
 	'empty-italic'         => '[i][/i]',
+	'image-only'           => '[img]https://example.org/a.png[/img]',
+	'image-with-size'      => '[img=100x100]https://example.org/a.png[/img]',
+	'link-blank-label'     => '[url=https://example.org/a] [/url]',
+	'link-empty-label'     => '[url=https://example.org/a][/url]',
+	'url-tag'              => '[url]https://example.org/a[/url]',
+	'bare-link-only'       => 'https://example.org/a',
+	'attachment-inline'    => '[attachment=0]obrazek.png[/attachment]',
+	'flash'                => '[flash=200,100]https://example.org/a.swf[/flash]',
 );
 
 define('IN_PHPBB', true);

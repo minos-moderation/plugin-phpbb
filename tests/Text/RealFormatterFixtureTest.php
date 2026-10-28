@@ -17,7 +17,8 @@ final class RealFormatterFixtureTest extends TestCase
 	private const DIR = __DIR__ . '/../fixtures/phpbb-3.3';
 
 	/** The corpus the fixtures must cover. */
-	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies');
+	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies',
+		'image', 'image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'url-tag', 'bare-link-only');
 
 	/**
 	 * @return array<string,array{0:array<string,string>}>
@@ -86,7 +87,17 @@ final class RealFormatterFixtureTest extends TestCase
 			'size'                 => array('size', 'rozmiarowy'),
 			'underline and italics' => array('underline-italic', 'podkreślone'),
 			'smilies'              => array('smilies', 'Wesoło :) i bardzo :D koniec'),
-			'an image'             => array('image', 'Obrazek https://example.org/a.png koniec'),
+			// The plugins' shared rule F7: an image, an attachment or a video is no text, a
+			// link's address is text only where the reader sees it.
+			'an image beside text' => array('image', 'Obrazek  koniec'),
+			'an image alone'       => array('image-only', ''),
+			'an image with a size' => array('image-with-size', ''),
+			'an inline attachment' => array('attachment-inline', ''),
+			'a video'              => array('flash', ''),
+			'a link, blank label'  => array('link-blank-label', ''),
+			'a link, no label'     => array('link-empty-label', ''),
+			'a [url] address'      => array('url-tag', 'https://example.org/a'),
+			'a bare address alone' => array('bare-link-only', 'https://example.org/a'),
 			'plain lines'          => array('plain-lines', "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""),
 			'bold around a blank'  => array('blank-bold', ''),
 			'empty italics'        => array('empty-italic', ''),

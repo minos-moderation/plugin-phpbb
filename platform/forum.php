@@ -51,6 +51,14 @@ class forum
 	/** Elements of phpBB's stored XML that hold the markup as typed (`[b]`, `[/b]`), not text. */
 	const MARKUP_ELEMENTS = array('s', 'e');
 
+	/**
+	 * Elements of phpBB's stored XML a reader sees as an image, a video or a file, not as
+	 * text: an image (`[img]`, also `[img=WxH]`), an inline attachment, a Flash video. The
+	 * text inside them is an address or a file name the reader does not read (the plugins'
+	 * shared rule F7): it is not text to assess.
+	 */
+	const MEDIA_ELEMENTS = array('IMG', 'ATTACHMENT', 'FLASH');
+
 	/** Elements of phpBB's stored XML that a reader sees on lines of their own. */
 	const BLOCK_ELEMENTS = array('QUOTE', 'LIST', 'LI', 'CODE', 'br', 'p');
 
@@ -177,11 +185,14 @@ class forum
 	 * (a quote, a list and its items, code, a line break) starts and ends a line.
 	 *
 	 * Quotes are kept, each introduced by its author ("Kasia napisał(a):"): whatever a post
-	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. Links,
-	 * images and smilies stay as their text, and the text of `title` and `alt` attributes is
-	 * kept, after the text: words can hide there as well. A stored text that is not phpBB's
-	 * XML is read with its markup, so that nothing in it is hidden. The text is NOT shortened
-	 * here.
+	 * publishes is assessed, and wrapping words in `[quote]` must not hide them. A link and a
+	 * smiley stay as the text a reader sees (a bare address too); a link with a blank label
+	 * adds nothing. An image, an inline attachment or a video adds no text: the address or
+	 * file name inside it is not what a reader reads (the plugins' shared rule F7), so a post
+	 * of only such things has no text to assess. The text of `title` and `alt` attributes is
+	 * kept, after the text, when there is other text: words can hide there as well, but they
+	 * never make a text to assess alone. A stored text that is not phpBB's XML is read with
+	 * its markup, so that nothing in it is hidden. The text is NOT shortened here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
 	 * @return string The plain text, trimmed.
@@ -212,9 +223,13 @@ class forum
 				$lines = substr_count($m[0], "\n");
 				return str_repeat("\n", max(1, $lines));
 			}, $text);
-			foreach ($attributes as $attribute)
+			// A title or alt goes with the text it sits beside, never alone (F7).
+			if (preg_replace('/[\s\p{Z}]+/u', '', $text) !== '')
 			{
-				$text .= "\n" . $attribute;
+				foreach ($attributes as $attribute)
+				{
+					$text .= "\n" . $attribute;
+				}
 			}
 		}
 		$text = str_replace(array("\r\n", "\r"), "\n", $text);
@@ -253,6 +268,11 @@ class forum
 				}
 			}
 			$inner = $this->node_text($child, $attributes);
+			if (in_array($child->nodeName, self::MEDIA_ELEMENTS, true))
+			{
+				// Seen as an image, a file or a video; its own title or alt were collected above.
+				continue;
+			}
 			if ($child->nodeName === 'QUOTE')
 			{
 				$author = trim($child->getAttribute('author'));
@@ -471,17 +491,6 @@ class forum
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
-	}
-
-	/**
-	 * Whether a stored text holds a link - also one a reader cannot see, with a blank text.
-	 *
-	 * @param string $xml The stored text (`post_text`).
-	 * @return bool
-	 */
-	public static function has_link($xml)
-	{
-		return (bool) preg_match(self::LINK_PATTERN, (string) $xml);
 	}
 
 	/**
