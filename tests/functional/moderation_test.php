@@ -199,6 +199,31 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertStringContainsString('Minos: zablokowane', $details);
 	}
 
+	public function test_a_forged_or_stale_delivery_is_refused_and_traced_for_the_acp(): void
+	{
+		$this->configure();
+		$post_id = $this->post_as_author('Minos test forged', 'Testowy wpis, na który ktoś podrabia werdykt.');
+		$delivery = json_encode(array('id' => 'phpbb:' . $post_id, 'status' => 'ocenione', 'kwalifikacja' => 'bezpieczne',
+			'kategorie' => array(), 'ocenzurowany' => null, 'wsparcie' => false, 'wersja' => '0000000000000000'));
+
+		$forged = $this->deliver($delivery, 'inny-sekret-niz-ten-od-operatora-000');
+		$stale = $this->deliver($delivery, null, time() - 301);
+
+		$this->assertSame(array(401, ''), array($forged['status'], $forged['body']), 'another secret');
+		$this->assertSame(array(401, ''), array($stale['status'], $stale['body']), 'a clock 301 s off: the same answer');
+		$this->assertSame('pending', $this->row($post_id)['status'], 'nothing applied');
+		$trace = $this->config_rows()['minos_moderation_signature_rejected'][0];
+		$this->assertStringStartsWith('2 stale ', $trace, 'two refusals, the last one for the clock');
+		$this->assertStringNotContainsString(self::SECRET, $trace);
+		$page = $this->acp_page()->filter('#main')->text();
+		$this->logout();
+		$this->assertStringContainsString('zegara serwera', $page, 'the ACP names the clock');
+
+		$this->assertSame(array(200, ''), array_slice(array_values($this->deliver($delivery)), 0, 2), 'the gateway\'s own delivery');
+		$this->assertSame('published', $this->row($post_id)['status']);
+		$this->assertSame('', $this->config_rows()['minos_moderation_signature_rejected'][0], 'forgotten once a delivery passes');
+	}
+
 	public function test_what_the_webhook_answers_while_the_board_or_the_extension_is_off(): void
 	{
 		$this->configure();
@@ -316,19 +341,22 @@ class moderation_test extends \phpbb_functional_test_case
 	}
 
 	/**
-	 * Sends one delivery to the board's webhook, signed now as the gateway signs.
+	 * Sends one delivery to the board's webhook, signed as the gateway signs.
 	 *
-	 * @param string $body The payload.
+	 * @param string      $body   The payload.
+	 * @param string|null $secret The secret to sign with; the board's by default.
+	 * @param int|null    $time   The signature's moment; now by default.
 	 * @return array{status:int,body:string,type:string}
 	 */
-	protected function deliver($body)
+	protected function deliver($body, $secret = null, $time = null)
 	{
 		client_loader::register();
+		$header = Signature::sign(($secret !== null) ? $secret : self::SECRET, $body, ($time !== null) ? $time : time());
 		$handle = curl_init(self::$root_url . 'app.php/minos/webhook');
 		curl_setopt_array($handle, array(
 			CURLOPT_POST           => true,
 			CURLOPT_POSTFIELDS     => $body,
-			CURLOPT_HTTPHEADER     => array('Content-Type: application/json', 'X-Wergiliusz-Podpis: ' . Signature::sign(self::SECRET, $body, time())),
+			CURLOPT_HTTPHEADER     => array('Content-Type: application/json', 'X-Wergiliusz-Podpis: ' . $header),
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_TIMEOUT        => 20,
 		));

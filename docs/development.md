@@ -306,7 +306,9 @@ invented key and secret. Scenarios, in order on one board: enabling the extensio
 table, every migration, starts switched off, the ACP page and the webhook URL); a post by a
 registered user (`f_noapprove` by phpBB's defaults) held, ONE item in the mock's queue, the
 mock's signed delivery through `app.php/minos/webhook` publishing it; a mask (the reader sees
-`██████`); `zablokowane` held, with the MCP queue's mark and details; the webhook while the
+`██████`); `zablokowane` held, with the MCP queue's mark and details; a delivery signed with
+another secret and one 301 s old refused with the same empty `401`, nothing applied, traced
+for the ACP (the clock named) and forgotten after the gateway's own delivery; the webhook while the
 board is disabled, the assessment switched off and the extension disabled; "Delete data"
 removing the table, every `config` and `config_text` value, the ACP modules and the
 migrations. The queue e-mail to moderators (audit R20, K-60) is checked in phpBB's own e-mail
