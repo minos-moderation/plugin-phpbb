@@ -332,6 +332,11 @@ failed jobs. Nothing replaces an asset (`--clobber` is never used), so a second 
 fails loudly. A failed check publishes nothing: delete the tag, fix `main`, start again
 from step 1. By hand: `bash bin/build-zip.sh`, then `.github/scripts/check-release-archive.sh build/minos-moderation-0.1.0.zip v0.1.0`.
 
+An installed board updates by disabling the extension, replacing its files and enabling it:
+phpBB runs new migrations only on enabling (`extension\base::enable_step()`), so files
+replaced under an enabled extension meet a schema without their columns. The README says so
+("Aktualizacja"); a release that adds a migration must not be installed otherwise.
+
 Nothing in this repository enforces that only the owner tags (the session refusal lives
 outside GitHub): the owner should add a tag ruleset on `v*` that only they may bypass, or
 a `release` environment with a required reviewer on the `publish` job.

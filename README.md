@@ -34,6 +34,23 @@ Paczka zawiera tylko to, co ładuje phpBB, oraz źródła dołączonej bibliotek
 testów, atrapy bramy, `composer.lock` ani plików `composer.json` bibliotek; własny
 `composer.json` rozszerzenia zostaje, bo bez niego phpBB nie zainstaluje rozszerzenia.
 
+## Aktualizacja
+
+Nową wersję instaluj zawsze w tej kolejności:
+
+1. **Dostosuj → Zarządzaj rozszerzeniami → „Minos — moderacja postów” → Wyłącz** (nie „Usuń
+   dane”: to usunęłoby zapisane werdykty, ustawienia, klucz i sekret).
+2. Zastąp katalog `ext/minos/moderation/` zawartością nowej paczki (usuń stary katalog i
+   rozpakuj nową paczkę na jego miejsce).
+3. **Włącz** rozszerzenie: phpBB uruchamia wtedy migracje nowej wersji (nowe ustawienia i
+   kolumny tabeli rozszerzenia). Ustawienia, klucz i sekret zostają.
+
+Nie podmieniaj plików włączonego rozszerzenia: phpBB nie uruchomi wtedy migracji, a kod nowej
+wersji odwoła się do kolumn, których nie ma w bazie (np. przy doręczeniu werdyktu na webhook),
+i zakończy się błędem bazy danych. W czasie aktualizacji, gdy rozszerzenie jest wyłączone,
+webhook odpowiada `404` (brama ponawia doręczenie), a wstrzymane posty czekają w kolejce; co
+dzieje się z nimi po ponownym włączeniu — patrz „Wyłączenie”.
+
 ## Ustawienia
 
 | Ustawienie | Domyślnie | Znaczenie |
@@ -99,7 +116,9 @@ hostów zapisanych przy kluczu i nie podąża za przekierowaniami.
    bazie. Jeśli zapis się nie uda, post zostaje w kolejce — oryginalny tekst nigdy nie
    zostaje opublikowany zamiast zamaskowanego.
 4. Każda decyzja rozszerzenia trafia do dziennika moderatorów (autor wpisu: Anonymous, opis:
-   „Minos …”). Powiadomienia o nowym poście (dla obserwujących temat i forum, zakładki,
+   „Minos …”, z tematem postu; treści postu tam nie ma). Te wpisy należą do forum: nie
+   znikają po 30 dniach razem z danymi rozszerzenia (patrz „Zadanie cron”), tylko zostają w
+   dzienniku jak każdy inny jego wpis, według zasad forum. Powiadomienia o nowym poście (dla obserwujących temat i forum, zakładki,
    cytowanych) wychodzą raz, w chwili publikacji przez rozszerzenie; jeśli post zatwierdził
    moderator, powiadamia wyłącznie phpBB.
 
@@ -262,7 +281,9 @@ Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie na
 czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
 „poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
 wpisy 30 dni po rozstrzygnięciu: z wpisem znikają zapisany werdykt i oryginał zamaskowanego
-postu. Na forach o małym
+postu (to wszystkie dane, które rozszerzenie przechowuje o poście). Wpisy w dzienniku
+moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) zostają: to rejestr
+forum, przechowywany według zasad forum. Na forach o małym
 ruchu warto uruchamiać cron phpBB z systemu (`bin/phpbbcli.php cron:run`), bo cron
 wywoływany odsłonami stron może się opóźniać.
 
