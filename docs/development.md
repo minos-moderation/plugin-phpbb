@@ -249,7 +249,10 @@ decision).
   `f_report` by default): the listener on `core.report_post_auth` clears that check for the
   extension's own report only (`forum::reporting()`). A post with an open report (phpBB
   refuses a second: `already_reported_exception`) is not reported again, and a repeated
-  delivery is dropped before it (the row is no longer `received`). The report keeps phpBB's
+  delivery is dropped before it (the row is no longer `received`). Any other refusal (the
+  post gone, a check another extension adds on `core.report_post_auth` after this one) leaves
+  the post published and writes `LOG_MINOS_SUPPORT_REPORT_FAILED` into the error log: the
+  post's id and phpBB's code (a language key, else the exception's class), never its text. The report keeps phpBB's
   copy of the post as reported, as every report does, under the forum's rules (A8).
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an
   unapproved -> deleted change as if the post had been counted, lowering `user_posts` and

@@ -799,7 +799,9 @@ class forum
 	 * clears that check for this one report ({@see reporting}, `core.report_post_auth`).
 	 *
 	 * A post that already has an open report (phpBB refuses a second one) is in the moderators'
-	 * reports already, and is not reported again.
+	 * reports already, and is not reported again. Any other refusal (the post gone, a check
+	 * another extension adds on `core.report_post_auth`) loses the signal: the error log says so
+	 * ({@see log_report_refusal}).
 	 *
 	 * @param array<string,mixed> $post    A row from {@see load_post}.
 	 * @param string              $verdict The gateway's verdict, named in the report.
@@ -835,9 +837,14 @@ class forum
 			$this->reports->get_instance('post')->add_report($post_id, (int) $reason['reason_id'], $text, 0);
 			return true;
 		}
+		catch (\phpbb\report\exception\already_reported_exception $e)
+		{
+			// An open report is in the moderators' queue already.
+			return false;
+		}
 		catch (\phpbb\report\exception\invalid_report_exception $e)
 		{
-			// Reported already (an open report is in the moderators' queue), or gone.
+			$this->log_report_refusal($post_id, $e);
 			return false;
 		}
 		finally
@@ -853,6 +860,26 @@ class forum
 				}
 			}
 		}
+	}
+
+	/**
+	 * Writes into the error log that a post with `wsparcie` could not be reported: the post's
+	 * id and phpBB's code of the refusal (a language key such as `USER_CANNOT_REPORT`, or the
+	 * exception's class when the message is not one), never the post's text.
+	 *
+	 * @param int                                          $post_id The post.
+	 * @param \phpbb\report\exception\invalid_report_exception $e       phpBB's refusal.
+	 * @return void
+	 */
+	protected function log_report_refusal($post_id, \phpbb\report\exception\invalid_report_exception $e)
+	{
+		$code = (string) $e->getMessage();
+		if (!preg_match('/^[A-Z][A-Z0-9_]{0,63}$/', $code))
+		{
+			$parts = explode('\\', get_class($e));
+			$code = (string) end($parts);
+		}
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_REPORT_FAILED', false, array((int) $post_id, $code));
 	}
 
 	/**

@@ -716,6 +716,45 @@ final class WebhookTest extends TestCase
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 		self::assertSame(array((string) Board::USER), array_column($this->board->reports->of($id), 'user_id'), 'the member\'s report only');
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_SUPPORT_REPORT_FAILED'), 'not a failure: the report is there');
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function refusalCodes(): array
+	{
+		return array(
+			'a language key'      => array('NOT_AUTHORISED_BY_ANOTHER_EXTENSION', 'NOT_AUTHORISED_BY_ANOTHER_EXTENSION'),
+			'not a language key'  => array('Odmowa z opisem, który mógłby cokolwiek zawierać', 'report_permission_denied_exception'),
+		);
+	}
+
+	/**
+	 * @dataProvider refusalCodes
+	 */
+	public function testAReportAnotherExtensionRefusesIsInTheErrorLogAndThePostStaysPublished(string $message, string $code): void
+	{
+		// Review of #8, minor 2: another extension's listener of core.report_post_auth, run after
+		// this one, adds a check the guest fails; the signal must not vanish without a trace.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$ours = $this->board->reports->on_auth;
+		$this->board->reports->on_auth = static function (\phpbb\event\data $event) use ($ours, $message) {
+			call_user_func($ours, $event);
+			$checks = $event['acl_check_ary'];
+			$checks['u_minos_test_other_extension'] = $message;
+			$event['acl_check_ary'] = $checks;
+		};
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true))));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'published all the same');
+		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->reports->of($id));
+		$failures = $this->board->log->of('LOG_MINOS_SUPPORT_REPORT_FAILED');
+		self::assertCount(1, $failures, 'the lost signal is in the error log');
+		self::assertSame(array('critical', array($id, $code)), array($failures[0]['mode'], $failures[0]['data']),
+			'the post and phpBB\'s code, nothing of its text');
 	}
 
 	public function testOnlyTheExtensionsOwnReportSkipsPhpbbsPermissionCheck(): void

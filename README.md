@@ -309,7 +309,9 @@ postu.
   moderatora w „Zgłoszonych postach”, a phpBB powiadamia o nim moderatorów jak o każdym
   zgłoszeniu. Zgłaszającym jest gość (Anonymous); tekst zgłoszenia nie zawiera treści postu.
   Post, który ma już otwarte zgłoszenie (np. od użytkownika), nie dostaje drugiego: phpBB na
-  to nie pozwala, a moderatorzy i tak mają go w kolejce zgłoszeń.
+  to nie pozwala, a moderatorzy i tak mają go w kolejce zgłoszeń. Gdy phpBB odrzuci zgłoszenie
+  z innego powodu (np. dodatkowe sprawdzenie innego rozszerzenia), post zostaje opublikowany,
+  a dziennik błędów w panelu administracyjnym dostaje wpis z numerem postu i kodem odmowy.
 
 ## Zadanie cron
 
