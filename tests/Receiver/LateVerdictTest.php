@@ -73,39 +73,64 @@ final class LateVerdictTest extends TestCase
 	}
 
 	/**
-	 * @return array<string,array{0:array<string,string>,1:string,2:array<string,mixed>}>
+	 * @return array<string,array{0:array<string,string>,1:string,2:string|null,3:bool,4:string,5:string}>
 	 */
 	public function lateVerdictsThatWouldTakeItBack(): array
 	{
+		// Settings, verdict, mask (a mask that fits, one that does not, or none), whether the
+		// masked text can be stored, the row's final status and the moderator log's entry.
+		$left = array(pending_store::PUBLISHED, 'LOG_MINOS_POST_LEFT_PUBLISHED');
 		return array(
-			'zablokowane, hold'          => array(array(settings::BLOCKED => settings::HOLD), 'zablokowane', array()),
-			'zablokowane, delete'        => array(array(settings::BLOCKED => settings::BLOCKED_DELETE), 'zablokowane', array()),
-			'ocenzurowane, hold'         => array(array(settings::CENSORED => settings::HOLD), 'ocenzurowane', array('ocenzurowany' => 'x')),
-			'ocenzurowane, does not fit' => array(array(), 'ocenzurowane', array('ocenzurowany' => '████')),
+			'zablokowane, hold'          => array_merge(array(array(settings::BLOCKED => settings::HOLD), 'zablokowane', null, true), $left),
+			'zablokowane, delete'        => array_merge(array(array(settings::BLOCKED => settings::BLOCKED_DELETE), 'zablokowane', null, true), $left),
+			'ocenzurowane, hold'         => array_merge(array(array(settings::CENSORED => settings::HOLD), 'ocenzurowane', 'fits', true), $left),
+			'ocenzurowane, does not fit' => array_merge(array(array(), 'ocenzurowane', 'does not fit', true), $left),
+			// Review of #8, minor 3: the late mask applied, and one that cannot be stored.
+			'ocenzurowane, a mask that fits' => array(array(), 'ocenzurowane', 'fits', true, pending_store::MASKED, 'LOG_MINOS_POST_MASKED'),
+			'ocenzurowane, cannot be stored' => array_merge(array(array(), 'ocenzurowane', 'fits', false), $left),
 		);
 	}
 
 	/**
 	 * @dataProvider lateVerdictsThatWouldTakeItBack
 	 * @param array<string,string> $settings
-	 * @param array<string,mixed>  $extra
 	 */
-	public function testALateVerdictWithSupportLeavesThePostPublishedAndReportsIt(array $settings, string $verdict, array $extra): void
+	public function testALateVerdictWithSupportLeavesThePostPublishedAndReportsIt(array $settings, string $verdict, ?string $mask,
+		bool $storable, string $status, string $log): void
 	{
 		// The plugins' shared rule A7: a post with `wsparcie` is never deleted, rejected or
 		// hidden automatically; it stays published until a person decides.
-		$id = $this->published_by_fail_open('Testowy wpis o bardzo złym dniu.');
+		$id = $this->published_by_fail_open('To jest brzydkie słowo w teście.');
+		$original = $this->board->post($id)['post_text'];
 		$this->board->configure($settings + array(settings::FAIL_MODE => settings::FAIL_OPEN));
+		$extra = array('kategorie' => array('samookaleczenie'), 'wsparcie' => true);
+		if ($mask !== null)
+		{
+			$extra['ocenzurowany'] = ($mask === 'fits') ? $this->board->title($id) . "\n\nTo jest ████████ słowo w teście." : '████';
+		}
+		if (!$storable)
+		{
+			$this->board->db->pdo->exec('CREATE TRIGGER minos_test_text BEFORE UPDATE OF post_text ON phpbb_posts BEGIN SELECT RAISE(IGNORE); END');
+		}
 		$calls = count($this->board->visibility->calls);
 		$notified = count($this->board->notifications->calls);
 
-		self::assertSame(200, $this->late($id, $verdict, $extra + array('kategorie' => array('samookaleczenie'), 'wsparcie' => true)));
+		self::assertSame(200, $this->late($id, $verdict, $extra));
 
-		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'still published');
+		$post = $this->board->post($id);
+		self::assertSame(ITEM_APPROVED, (int) $post['post_visibility'], 'still published');
 		self::assertSame(array(), array_slice($this->board->visibility->calls, $calls), 'neither taken back nor deleted');
-		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
+		self::assertSame($status, $this->board->row($id)['status']);
+		if ($status === pending_store::MASKED)
+		{
+			self::assertStringNotContainsString('brzydkie', $post['post_text'], 'the mask applied');
+		}
+		else
+		{
+			self::assertSame($original, $post['post_text'], 'the post as the failure mode published it');
+		}
 		self::assertSame(array(), array_merge($this->board->log->of('LOG_MINOS_POST_RETURNED'), $this->board->log->of('LOG_MINOS_POST_DELETED')));
-		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_LEFT_PUBLISHED'));
+		self::assertCount(1, $this->board->log->of($log));
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
 		$reports = $this->board->reports->of($id);
 		self::assertCount(1, $reports);
