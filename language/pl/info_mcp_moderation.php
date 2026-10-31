@@ -27,6 +27,7 @@ $lang = array_merge($lang, array(
 	'LOG_MINOS_POST_MASKED'    => '<strong>Minos opublikował post z zamaskowanymi fragmentami</strong><br />» %s',
 	'LOG_MINOS_POST_HELD'      => '<strong>Minos zostawił post w kolejce do zatwierdzenia</strong><br />» %s',
 	'LOG_MINOS_POST_DELETED'   => '<strong>Minos usunął post (miękko)</strong><br />» %s',
+	'LOG_MINOS_POST_LEFT_PUBLISHED' => '<strong>Minos zostawił opublikowany post do decyzji moderatora (potrzebne wsparcie) mimo werdyktu po publikacji</strong><br />» %s',
 	'LOG_MINOS_SUPPORT'        => '<strong>Minos: autor może potrzebować wsparcia</strong><br />» %s',
 
 	'MINOS_MCP_WAITING'                  => 'Minos: w ocenie',

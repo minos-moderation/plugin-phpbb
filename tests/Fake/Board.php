@@ -119,6 +119,9 @@ class Board
 	/** @var \phpbb\user The user who posts. */
 	public $user;
 
+	/** @var ReportHandler phpBB's post reports (the MCP's "Reported posts"). */
+	public $reports;
+
 	/** @var listener */
 	public $listener;
 
@@ -152,23 +155,33 @@ class Board
 		$board->parser = new TextParser();
 		$board->log = new MemoryLog();
 		$board->language = new \phpbb\language\language(__DIR__ . '/../../language/pl');
+		$board->auth = new \phpbb\auth\auth();
+		$board->auth->global['f_noapprove'] = true;
+		$board->user = new \phpbb\user();
+		// A session's user: phpBB loaded her permissions (`user_permissions`).
+		$board->user->data['user_permissions'] = '';
+		$board->reports = new ReportHandler($board->db, $board->auth, $board->user, $board->notifications, self::PREFIX);
 		$board->forum = new forum($board->db, $board->visibility, $board->notifications, new TextUtils(), $board->parser,
 			$board->log, $board->language, self::PREFIX . 'posts', self::PREFIX . 'topics', self::PREFIX . 'forums', self::PREFIX . 'users',
-			self::PREFIX . 'groups', self::PREFIX . 'user_group', self::PREFIX . 'poll_options');
+			self::PREFIX . 'groups', self::PREFIX . 'user_group', self::PREFIX . 'poll_options',
+			new \phpbb\report\handler_factory($board->reports), $board->user, $board->auth, self::PREFIX . 'reports_reasons');
 		$board->transport = $transport ?: new RecordingTransport();
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
 		$board->receiver = new receiver($board->settings, $board->store);
 		$board->deferred = new deferred_verdicts($board->applier, $board->forum);
 		$board->dispatcher = new RecordingDispatcher();
-		$board->auth = new \phpbb\auth\auth();
-		$board->auth->global['f_noapprove'] = true;
-		$board->user = new \phpbb\user();
 		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
 		// phpBB's dispatcher runs the extension's listener inside the notification manager.
 		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board) {
 			$events = listener::getSubscribedEvents();
 			$method = $events['core.notification_manager_add_notifications'];
+			$board->listener->$method($event);
+		};
+		// ... and inside the report handler's permission check.
+		$board->reports->on_auth = static function (\phpbb\event\data $event) use ($board) {
+			$events = listener::getSubscribedEvents();
+			$method = $events['core.report_post_auth'];
 			$board->listener->$method($event);
 		};
 		return $board;
@@ -559,7 +572,18 @@ class Board
 			post_time INTEGER NOT NULL DEFAULT 0, post_visibility INTEGER NOT NULL DEFAULT 0, post_subject TEXT NOT NULL DEFAULT '',
 			post_text TEXT NOT NULL DEFAULT '', post_username TEXT NOT NULL DEFAULT '', post_checksum TEXT NOT NULL DEFAULT '',
 			bbcode_uid TEXT NOT NULL DEFAULT '', bbcode_bitfield TEXT NOT NULL DEFAULT '', post_delete_reason TEXT NOT NULL DEFAULT '',
-			post_delete_user INTEGER NOT NULL DEFAULT 0, post_delete_time INTEGER NOT NULL DEFAULT 0)");
+			post_delete_user INTEGER NOT NULL DEFAULT 0, post_delete_time INTEGER NOT NULL DEFAULT 0,
+			post_reported INTEGER NOT NULL DEFAULT 0)");
+		$this->db->pdo->exec("ALTER TABLE {$prefix}topics ADD COLUMN topic_reported INTEGER NOT NULL DEFAULT 0");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}reports (report_id INTEGER PRIMARY KEY AUTOINCREMENT, reason_id INTEGER NOT NULL DEFAULT 0,
+			post_id INTEGER NOT NULL DEFAULT 0, pm_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0,
+			user_notify INTEGER NOT NULL DEFAULT 0, report_closed INTEGER NOT NULL DEFAULT 0, report_time INTEGER NOT NULL DEFAULT 0,
+			report_text TEXT NOT NULL DEFAULT '', reported_post_text TEXT NOT NULL DEFAULT '')");
+		$this->db->pdo->exec("CREATE TABLE {$prefix}reports_reasons (reason_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			reason_title TEXT NOT NULL DEFAULT '', reason_description TEXT NOT NULL DEFAULT '', reason_order INTEGER NOT NULL DEFAULT 0)");
+		// The reasons phpBB installs (`install/schemas/schema_data.sql`).
+		$this->db->pdo->exec("INSERT INTO {$prefix}reports_reasons (reason_title, reason_description, reason_order) VALUES
+			('warez', '{L_REPORT_WAREZ}', 1), ('spam', '{L_REPORT_SPAM}', 2), ('off_topic', '{L_REPORT_OFF_TOPIC}', 3), ('other', '{L_REPORT_OTHER}', 4)");
 		$this->db->pdo->exec("CREATE TABLE {$prefix}groups (group_id INTEGER PRIMARY KEY, group_type INTEGER NOT NULL DEFAULT 1,
 			group_name TEXT NOT NULL DEFAULT '')");
 		$this->db->pdo->exec("CREATE TABLE {$prefix}user_group (group_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0,

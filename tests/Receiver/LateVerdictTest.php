@@ -72,24 +72,67 @@ final class LateVerdictTest extends TestCase
 		self::assertSame(array($id => ITEM_APPROVED), $changes[0]['before']);
 	}
 
-	public function testALateBlockWithSupportTakesThePostBackToTheQueueEvenWhenTheSettingDeletes(): void
+	/**
+	 * @return array<string,array{0:array<string,string>,1:string,2:array<string,mixed>}>
+	 */
+	public function lateVerdictsThatWouldTakeItBack(): array
 	{
-		// The plugins' shared rule A7: a post with `wsparcie` is never removed automatically.
+		return array(
+			'zablokowane, hold'          => array(array(settings::BLOCKED => settings::HOLD), 'zablokowane', array()),
+			'zablokowane, delete'        => array(array(settings::BLOCKED => settings::BLOCKED_DELETE), 'zablokowane', array()),
+			'ocenzurowane, hold'         => array(array(settings::CENSORED => settings::HOLD), 'ocenzurowane', array('ocenzurowany' => 'x')),
+			'ocenzurowane, does not fit' => array(array(), 'ocenzurowane', array('ocenzurowany' => '████')),
+		);
+	}
+
+	/**
+	 * @dataProvider lateVerdictsThatWouldTakeItBack
+	 * @param array<string,string> $settings
+	 * @param array<string,mixed>  $extra
+	 */
+	public function testALateVerdictWithSupportLeavesThePostPublishedAndReportsIt(array $settings, string $verdict, array $extra): void
+	{
+		// The plugins' shared rule A7: a post with `wsparcie` is never deleted, rejected or
+		// hidden automatically; it stays published until a person decides.
 		$id = $this->published_by_fail_open('Testowy wpis o bardzo złym dniu.');
-		$this->board->configure(array(settings::BLOCKED => settings::BLOCKED_DELETE));
+		$this->board->configure($settings + array(settings::FAIL_MODE => settings::FAIL_OPEN));
 		$calls = count($this->board->visibility->calls);
 		$notified = count($this->board->notifications->calls);
 
-		self::assertSame(200, $this->late($id, 'zablokowane', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true)));
+		self::assertSame(200, $this->late($id, $verdict, $extra + array('kategorie' => array('samookaleczenie'), 'wsparcie' => true)));
 
-		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility'], 'back in the queue, not deleted');
-		self::assertSame(array(ITEM_REAPPROVE), array_column(array_slice($this->board->visibility->calls, $calls), 'visibility'));
-		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
-		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_DELETED'));
-		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_RETURNED'));
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'still published');
+		self::assertSame(array(), array_slice($this->board->visibility->calls, $calls), 'neither taken back nor deleted');
+		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
+		self::assertSame(array(), array_merge($this->board->log->of('LOG_MINOS_POST_RETURNED'), $this->board->log->of('LOG_MINOS_POST_DELETED')));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_LEFT_PUBLISHED'));
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
-		self::assertSame(array(array('add', 'notification.type.topic_in_queue', $id)),
-			array_slice($this->board->notifications->calls, $notified), 'the moderators are told, once');
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports);
+		self::assertStringContainsString($verdict . '” po publikacji', $reports[0]['report_text']);
+		self::assertSame(array(array('add', 'notification.type.report_post', $id)), array_slice($this->board->notifications->calls, $notified),
+			'the moderators are told of the report, and of nothing in the approval queue');
+	}
+
+	public function testALateSafeVerdictWithSupportConfirmsThePostAndReportsIt(): void
+	{
+		$id = $this->published_by_fail_open('Testowy wpis o bardzo złym dniu.');
+
+		$this->late($id, 'bezpieczne', array('wsparcie' => true));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_CONFIRMED'));
+		self::assertCount(1, $this->board->reports->of($id));
+	}
+
+	public function testALateBlockWithoutSupportStillTakesThePostBack(): void
+	{
+		$id = $this->published_by_fail_open();
+
+		$this->late($id, 'zablokowane');
+
+		self::assertSame(ITEM_REAPPROVE, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(array(), $this->board->reports->of($id), 'no report without wsparcie');
 	}
 
 	public function testALateSafeVerdictConfirmsThePostWithoutNotifyingAgain(): void

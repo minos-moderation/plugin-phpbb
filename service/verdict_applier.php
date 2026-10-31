@@ -36,10 +36,13 @@ use minos\moderation\platform\forum;
  * confirms it - unless someone changed the post since: a moderator's decision, or an edit,
  * stands.
  *
- * `wsparcie` (the plugins' shared rule A7) is a signal for the moderators, never a reason for
- * an automatic removal: a post that carries it is never soft-deleted, whatever the setting
- * for `zablokowane`. Blocked, it is held in the approval queue (a late verdict takes it back
- * there), where the MCP marks it and the moderators get the queue e-mail; a person decides.
+ * `wsparcie` (the plugins' shared rule A7) is an active signal for the moderators, never a
+ * reason for an automatic removal: a post that carries it is never deleted, rejected or
+ * hidden by the extension, whatever the setting for `zablokowane`. A new post blocked stays
+ * held in the approval queue, where the MCP marks it and the moderators get the queue
+ * e-mail. A post that is published - on its verdict, masked, or by the failure mode before
+ * a late verdict that would take it back - stays published, and its moderators get a report
+ * in the MCP's "Reported posts" ({@see forum::report_support}); a person decides.
  */
 class verdict_applier
 {
@@ -60,6 +63,12 @@ class verdict_applier
 
 	/** Soft-delete the post. */
 	const DELETE = 'delete';
+
+	/**
+	 * Leave a post the failure mode published as it is, although the late verdict would take
+	 * it back: it carries `wsparcie`, and a person decides (A7).
+	 */
+	const LEAVE_PUBLISHED = 'leave_published';
 
 	/** The masked text could not be stored (also the error code recorded on the row). */
 	const MASK_FAILED = 'mask_failed';
@@ -238,6 +247,11 @@ class verdict_applier
 				$action = self::HOLD;
 				$extra['error_code'] = self::MASK_MANUAL;
 			}
+			if ($late && $support && $action === self::HOLD)
+			{
+				// A7: a published post with `wsparcie` is never taken back automatically.
+				$action = self::LEAVE_PUBLISHED;
+			}
 			switch ($action)
 			{
 				case self::PUBLISH:
@@ -268,6 +282,11 @@ class verdict_applier
 				case self::DELETE:
 					$status = pending_store::DELETED;
 					$log = 'LOG_MINOS_POST_DELETED';
+				break;
+
+				case self::LEAVE_PUBLISHED:
+					$status = pending_store::PUBLISHED;
+					$log = 'LOG_MINOS_POST_LEFT_PUBLISHED';
 				break;
 
 				default:
@@ -332,6 +351,11 @@ class verdict_applier
 				// `wsparcie`: a cue to reach out, whatever happened to the post; the moderator log
 				// shows it next to the post, also when the post was published.
 				$this->forum->log_decision($post, 'LOG_MINOS_SUPPORT');
+				if ($status === pending_store::PUBLISHED || $status === pending_store::MASKED)
+				{
+					// Not in the approval queue: the signal goes to the moderators' reports (A7).
+					$this->forum->report_support($post, $verdict, $late);
+				}
 			}
 
 			$this->db->sql_transaction('commit');

@@ -31,6 +31,10 @@ services:
             - '%tables.groups%'
             - '%tables.user_group%'
             - '%tables.poll_options%'
+            - '@phpbb.report.handler_factory'
+            - '@user'
+            - '@auth'
+            - '%tables.reports_reasons%'
 
     minos.moderation.transport:
         class: minos\moderation\service\curl_transport

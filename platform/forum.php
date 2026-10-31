@@ -136,6 +136,21 @@ class forum
 	/** @var string */
 	protected $poll_options_table;
 
+	/** @var \phpbb\report\handler_factory */
+	protected $reports;
+
+	/** @var \phpbb\user */
+	protected $user;
+
+	/** @var \phpbb\auth\auth */
+	protected $auth;
+
+	/** @var string */
+	protected $reports_reasons_table;
+
+	/** @var int The post the extension is reporting right now ({@see report_support}), or 0. */
+	protected $reporting = 0;
+
 	/**
 	 * @param \phpbb\db\driver\driver_interface     $db            The database.
 	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
@@ -151,6 +166,10 @@ class forum
 	 * @param string                                $groups_table
 	 * @param string                                $user_group_table
 	 * @param string                                $poll_options_table
+	 * @param \phpbb\report\handler_factory         $reports       phpBB's reports (the MCP's "Reported posts").
+	 * @param \phpbb\user                           $user          The request's user, whom phpBB's reports name.
+	 * @param \phpbb\auth\auth                      $auth          The request's permissions, which a report reloads.
+	 * @param string                                $reports_reasons_table
 	 */
 	public function __construct(
 		\phpbb\db\driver\driver_interface $db,
@@ -166,7 +185,11 @@ class forum
 		$users_table,
 		$groups_table,
 		$user_group_table,
-		$poll_options_table
+		$poll_options_table,
+		\phpbb\report\handler_factory $reports,
+		\phpbb\user $user,
+		\phpbb\auth\auth $auth,
+		$reports_reasons_table
 	)
 	{
 		$this->db = $db;
@@ -183,6 +206,10 @@ class forum
 		$this->groups_table = $groups_table;
 		$this->user_group_table = $user_group_table;
 		$this->poll_options_table = $poll_options_table;
+		$this->reports = $reports;
+		$this->user = $user;
+		$this->auth = $auth;
+		$this->reports_reasons_table = $reports_reasons_table;
 	}
 
 	/**
@@ -754,6 +781,89 @@ class forum
 		$type = $first ? self::QUEUE_NOTIFICATIONS[0] : self::QUEUE_NOTIFICATIONS[1];
 		$this->notifications->delete_notifications($type, $first ? (int) $post['topic_id'] : (int) $post['post_id']);
 		$this->notifications->add_notifications($type, $post);
+	}
+
+	/**
+	 * Reports a published post that carries `wsparcie` to its moderators: a report in the MCP's
+	 * "Reported posts", with phpBB's own notification of it (the plugins' shared rule A7: an
+	 * active signal in the moderators' own queue; the post itself stays published).
+	 *
+	 * Filed through phpBB's report handler (`phpbb.report.handler_factory`, the post handler's
+	 * `add_report()`), with the reason "other" (which phpBB never lets an administrator delete)
+	 * and the extension's text, never the post's: phpBB itself keeps a copy of the post as
+	 * reported, as for every report. The reporter is the guest (`ANONYMOUS`): phpBB names the
+	 * request's user, so for a request of someone else (the cron task run by a member's page
+	 * view, the CLI) the user's data is the guest's for the call and restored after it, with the
+	 * permissions phpBB reloads for the report. phpBB checks the reporter's `f_list`, `f_read`
+	 * and `f_report` on the forum, which a guest lacks by default: the extension's listener
+	 * clears that check for this one report ({@see reporting}, `core.report_post_auth`).
+	 *
+	 * A post that already has an open report (phpBB refuses a second one) is in the moderators'
+	 * reports already, and is not reported again.
+	 *
+	 * @param array<string,mixed> $post    A row from {@see load_post}.
+	 * @param string              $verdict The gateway's verdict, named in the report.
+	 * @param bool                $late    Whether the verdict came after the failure mode
+	 *     published the post.
+	 * @return bool Whether a report was filed.
+	 */
+	public function report_support(array $post, $verdict, $late)
+	{
+		$post_id = (int) $post['post_id'];
+		$result = $this->db->sql_query('SELECT reason_id FROM ' . $this->reports_reasons_table . " WHERE LOWER(reason_title) = 'other'");
+		$reason = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		$result = $this->db->sql_query('SELECT * FROM ' . $this->users_table . ' WHERE user_id = ' . (int) ANONYMOUS);
+		$guest = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		if (!$reason || !$guest || $post_id <= 0)
+		{
+			return false;
+		}
+		$this->language->add_lang('common', 'minos/moderation');
+		$text = $this->language->lang($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT', (string) $verdict);
+
+		$saved = $this->user->data;
+		$as_guest = (!isset($saved['user_id'], $saved['user_permissions']) || (int) $saved['user_id'] !== ANONYMOUS);
+		if ($as_guest)
+		{
+			$this->user->data = $guest;
+		}
+		$this->reporting = $post_id;
+		try
+		{
+			$this->reports->get_instance('post')->add_report($post_id, (int) $reason['reason_id'], $text, 0);
+			return true;
+		}
+		catch (\phpbb\report\exception\invalid_report_exception $e)
+		{
+			// Reported already (an open report is in the moderators' queue), or gone.
+			return false;
+		}
+		finally
+		{
+			$this->reporting = 0;
+			if ($as_guest)
+			{
+				$this->user->data = $saved;
+				if (isset($saved['user_permissions']))
+				{
+					// add_report() loaded the guest's permissions into the request's.
+					$this->auth->acl($this->user->data);
+				}
+			}
+		}
+	}
+
+	/**
+	 * The post the extension is reporting right now ({@see report_support}), for the listener
+	 * of `core.report_post_auth`.
+	 *
+	 * @return int The post id, or 0.
+	 */
+	public function reporting()
+	{
+		return $this->reporting;
 	}
 
 	/**

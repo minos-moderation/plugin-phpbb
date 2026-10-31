@@ -166,6 +166,7 @@ final class ExtensionTest extends TestCase
 		'template'              => '\phpbb\template\template',
 		'user'                  => '\phpbb\user',
 		'controller.helper'     => '\phpbb\controller\helper',
+		'phpbb.report.handler_factory' => '\phpbb\report\handler_factory',
 	);
 
 	public function testEveryServiceGetsTheArgumentsItsConstructorTakes(): void

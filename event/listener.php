@@ -111,7 +111,27 @@ class listener implements EventSubscriberInterface
 			'core.mcp_queue_get_posts_modify_post_row' => 'mark_queue_row',
 			'core.mcp_queue_approve_details_template'  => 'show_queue_details',
 			'core.notification_manager_add_notifications' => 'hold_back_queue_messages',
+			'core.report_post_auth'                  => 'allow_own_report',
 		);
+	}
+
+	/**
+	 * Lets the extension's own report of a post with `wsparcie` through phpBB's check of the
+	 * reporter's permissions (`f_list`, `f_read`, `f_report`): the report is filed in the
+	 * guest's name, whom phpBB does not let report by default ({@see forum::report_support}).
+	 * Every other report is checked as phpBB checks it.
+	 *
+	 * @param \phpbb\event\data $event `report_data` (the post and its topic), `acl_check_ary`.
+	 * @return void
+	 */
+	public function allow_own_report($event)
+	{
+		$report = $event['report_data'];
+		$reporting = $this->forum->reporting();
+		if ($reporting > 0 && is_array($report) && isset($report['post_id']) && (int) $report['post_id'] === $reporting)
+		{
+			$event['acl_check_ary'] = array();
+		}
 	}
 
 	/**
