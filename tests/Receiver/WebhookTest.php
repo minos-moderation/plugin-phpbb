@@ -736,6 +736,64 @@ final class WebhookTest extends TestCase
 		self::assertSame(0, $this->board->forum->reporting(), 'the extension is reporting nothing now');
 	}
 
+	public function testTheOwnReportOpensPhpbbsCheckForItsPostOnly(): void
+	{
+		// Review of #8, minor 1: while the extension files its report, a report of another post
+		// (here by a listener of the report's notification) is checked as phpBB checks it.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$other = $this->pending();
+		$board = $this->board;
+		$previous = $board->notifications->on_add;
+		$refused = false;
+		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board, $previous, $other, &$refused) {
+			call_user_func($previous, $event);
+			if ($event['notification_type_name'] !== 'notification.type.report_post')
+			{
+				return;
+			}
+			try
+			{
+				$board->reports->add_report($other, 4, 'Zgłoszenie testowe', 0);
+			}
+			catch (\phpbb\report\exception\report_permission_denied_exception $e)
+			{
+				$refused = true;
+			}
+		};
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true)));
+
+		self::assertCount(1, $this->board->reports->of($id), 'the extension\'s own report');
+		self::assertTrue($refused, 'the other post\'s report met phpBB\'s check');
+		self::assertSame(array(), $this->board->reports->of($other));
+	}
+
+	public function testAReportThatFailsLeavesPhpbbsCheckClosedAndTheUserRestored(): void
+	{
+		// Review of #8, minor 1: whatever add_report() throws, the extension stops reporting.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->board->user->data = array('user_id' => Board::USER, 'user_permissions' => '');
+		$this->board->reports->fail_with = new \RuntimeException('a database error');
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true)));
+		$this->board->reports->fail_with = null;
+
+		self::assertSame(0, $this->board->forum->reporting());
+		self::assertSame(array('user_id' => Board::USER, 'user_permissions' => ''), $this->board->user->data, 'the member, back');
+		self::assertSame(pending_store::RECEIVED, $this->board->row($id)['status'], 'rolled back, for the cron task');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_ROW_FAILED'));
+		try
+		{
+			$this->board->reports->add_report($id, 4, 'Zgłoszenie testowe', 0);
+			self::fail('the member\'s report without f_report is refused');
+		}
+		catch (\phpbb\report\exception\report_permission_denied_exception $e)
+		{
+			// phpBB's own refusal, as before the failed report.
+		}
+		self::assertSame(array(), $this->board->reports->of($id));
+	}
+
 	public function testAVerdictAppliedInAMembersRequestIsReportedAsTheGuestAndTheMemberIsRestored(): void
 	{
 		// The cron task runs in whichever request triggers it, also a member's page view:

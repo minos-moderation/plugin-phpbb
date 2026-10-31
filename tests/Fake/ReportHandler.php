@@ -40,6 +40,9 @@ class ReportHandler implements \phpbb\report\report_handler_interface
 	/** @var array<int,int> The user each notification was sent as (phpBB's `reporter_id`). */
 	public $notified_as = array();
 
+	/** @var \Throwable|null What a report throws once it is past the checks (a database error). */
+	public $fail_with = null;
+
 	/** @var array<string,mixed> */
 	protected $report_data = array();
 
@@ -61,6 +64,10 @@ class ReportHandler implements \phpbb\report\report_handler_interface
 		$reason_id = (int) $reason_id;
 		$report_text = (string) $report_text;
 		$this->validate_report_request($id);
+		if ($this->fail_with !== null)
+		{
+			throw $this->fail_with;
+		}
 
 		$result = $this->db->sql_query('SELECT * FROM ' . $this->prefix . 'reports_reasons WHERE reason_id = ' . $reason_id);
 		$row = $this->db->sql_fetchrow($result);
