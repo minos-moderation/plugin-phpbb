@@ -59,6 +59,16 @@ class forum
 	 */
 	const MEDIA_ELEMENTS = array('IMG', 'ATTACHMENT', 'FLASH');
 
+	/**
+	 * What a reader does not see on its own (as plugin-wordpress's and plugin-mybb's
+	 * `Text::INVISIBLE`): white space and separators (`\p{Z}`: U+3000, U+2028, ...), format
+	 * characters (`\p{Cf}`: U+200B, U+00AD, U+2060, U+200E, U+FEFF, ...), controls
+	 * (`\p{Cc}`), marks without a base letter (`\p{M}`: U+034F, U+FE0F; real text keeps its
+	 * base letters, so "e" + U+0301 stays text), and the blank fillers some scripts carry (the
+	 * Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the blank Braille pattern U+2800).
+	 */
+	const INVISIBLE = '/[\s\p{Z}\p{Cf}\p{Cc}\p{M}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+/u';
+
 	/** Elements of phpBB's stored XML that a reader sees on lines of their own. */
 	const BLOCK_ELEMENTS = array('QUOTE', 'LIST', 'LI', 'CODE', 'br', 'p');
 
@@ -126,6 +136,21 @@ class forum
 	/** @var string */
 	protected $poll_options_table;
 
+	/** @var \phpbb\report\handler_factory */
+	protected $reports;
+
+	/** @var \phpbb\user */
+	protected $user;
+
+	/** @var \phpbb\auth\auth */
+	protected $auth;
+
+	/** @var string */
+	protected $reports_reasons_table;
+
+	/** @var int The post the extension is reporting right now ({@see report_support}), or 0. */
+	protected $reporting = 0;
+
 	/**
 	 * @param \phpbb\db\driver\driver_interface     $db            The database.
 	 * @param \phpbb\content_visibility             $visibility    Post visibility changes.
@@ -141,6 +166,10 @@ class forum
 	 * @param string                                $groups_table
 	 * @param string                                $user_group_table
 	 * @param string                                $poll_options_table
+	 * @param \phpbb\report\handler_factory         $reports       phpBB's reports (the MCP's "Reported posts").
+	 * @param \phpbb\user                           $user          The request's user, whom phpBB's reports name.
+	 * @param \phpbb\auth\auth                      $auth          The request's permissions, which a report reloads.
+	 * @param string                                $reports_reasons_table
 	 */
 	public function __construct(
 		\phpbb\db\driver\driver_interface $db,
@@ -156,7 +185,11 @@ class forum
 		$users_table,
 		$groups_table,
 		$user_group_table,
-		$poll_options_table
+		$poll_options_table,
+		\phpbb\report\handler_factory $reports,
+		\phpbb\user $user,
+		\phpbb\auth\auth $auth,
+		$reports_reasons_table
 	)
 	{
 		$this->db = $db;
@@ -173,6 +206,10 @@ class forum
 		$this->groups_table = $groups_table;
 		$this->user_group_table = $user_group_table;
 		$this->poll_options_table = $poll_options_table;
+		$this->reports = $reports;
+		$this->user = $user;
+		$this->auth = $auth;
+		$this->reports_reasons_table = $reports_reasons_table;
 	}
 
 	/**
@@ -243,17 +280,16 @@ class forum
 	}
 
 	/**
-	 * Whether a text holds nothing a reader sees: only white space, separators (`\p{Z}`) and
-	 * format characters (`\p{Cf}`: U+200B, U+00AD, U+2060, U+200E, U+FEFF, ...), which do not
-	 * make a text to assess (the plugins' shared rule F7). A text the pattern cannot read
-	 * (not UTF-8) is not blank: more text, never less.
+	 * Whether a text holds nothing a reader sees: only characters in {@see INVISIBLE}, which
+	 * do not make a text to assess (the plugins' shared rule F7). A text the pattern cannot
+	 * read (not UTF-8) is not blank: more text, never less.
 	 *
 	 * @param string $text A text.
 	 * @return bool
 	 */
 	public static function is_blank($text)
 	{
-		return preg_replace('/[\p{Cf}\p{Z}\s]+/u', '', (string) $text) === '';
+		return preg_replace(self::INVISIBLE, '', (string) $text) === '';
 	}
 
 	/**
@@ -745,6 +781,116 @@ class forum
 		$type = $first ? self::QUEUE_NOTIFICATIONS[0] : self::QUEUE_NOTIFICATIONS[1];
 		$this->notifications->delete_notifications($type, $first ? (int) $post['topic_id'] : (int) $post['post_id']);
 		$this->notifications->add_notifications($type, $post);
+	}
+
+	/**
+	 * Reports a published post that carries `wsparcie` to its moderators: a report in the MCP's
+	 * "Reported posts", with phpBB's own notification of it (the plugins' shared rule A7: an
+	 * active signal in the moderators' own queue; the post itself stays published).
+	 *
+	 * Filed through phpBB's report handler (`phpbb.report.handler_factory`, the post handler's
+	 * `add_report()`), with the reason "other" (which phpBB never lets an administrator delete)
+	 * and the extension's text, never the post's: phpBB itself keeps a copy of the post as
+	 * reported, as for every report. The reporter is the guest (`ANONYMOUS`): phpBB names the
+	 * request's user, so for a request of someone else (the cron task run by a member's page
+	 * view, the CLI) the user's data is the guest's for the call and restored after it, with the
+	 * permissions phpBB reloads for the report. phpBB checks the reporter's `f_list`, `f_read`
+	 * and `f_report` on the forum, which a guest lacks by default: the extension's listener
+	 * clears that check for this one report ({@see reporting}, `core.report_post_auth`).
+	 *
+	 * A post that already has an open report (phpBB refuses a second one) is in the moderators'
+	 * reports already, and is not reported again. Any other refusal (the post gone, a check
+	 * another extension adds on `core.report_post_auth`) loses the signal: the error log says so
+	 * ({@see log_report_refusal}).
+	 *
+	 * @param array<string,mixed> $post    A row from {@see load_post}.
+	 * @param string              $verdict The gateway's verdict, named in the report.
+	 * @param bool                $late    Whether the verdict came after the failure mode
+	 *     published the post.
+	 * @return bool Whether a report was filed.
+	 */
+	public function report_support(array $post, $verdict, $late)
+	{
+		$post_id = (int) $post['post_id'];
+		$result = $this->db->sql_query('SELECT reason_id FROM ' . $this->reports_reasons_table . " WHERE LOWER(reason_title) = 'other'");
+		$reason = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		$result = $this->db->sql_query('SELECT * FROM ' . $this->users_table . ' WHERE user_id = ' . (int) ANONYMOUS);
+		$guest = $this->db->sql_fetchrow($result);
+		$this->db->sql_freeresult($result);
+		if (!$reason || !$guest || $post_id <= 0)
+		{
+			return false;
+		}
+		$this->language->add_lang('common', 'minos/moderation');
+		$text = $this->language->lang($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT', (string) $verdict);
+
+		$saved = $this->user->data;
+		$as_guest = (!isset($saved['user_id'], $saved['user_permissions']) || (int) $saved['user_id'] !== ANONYMOUS);
+		if ($as_guest)
+		{
+			$this->user->data = $guest;
+		}
+		$this->reporting = $post_id;
+		try
+		{
+			$this->reports->get_instance('post')->add_report($post_id, (int) $reason['reason_id'], $text, 0);
+			return true;
+		}
+		catch (\phpbb\report\exception\already_reported_exception $e)
+		{
+			// An open report is in the moderators' queue already.
+			return false;
+		}
+		catch (\phpbb\report\exception\invalid_report_exception $e)
+		{
+			$this->log_report_refusal($post_id, $e);
+			return false;
+		}
+		finally
+		{
+			$this->reporting = 0;
+			if ($as_guest)
+			{
+				$this->user->data = $saved;
+				if (isset($saved['user_permissions']))
+				{
+					// add_report() loaded the guest's permissions into the request's.
+					$this->auth->acl($this->user->data);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Writes into the error log that a post with `wsparcie` could not be reported: the post's
+	 * id and phpBB's code of the refusal (a language key such as `USER_CANNOT_REPORT`, or the
+	 * exception's class when the message is not one), never the post's text.
+	 *
+	 * @param int                                          $post_id The post.
+	 * @param \phpbb\report\exception\invalid_report_exception $e       phpBB's refusal.
+	 * @return void
+	 */
+	protected function log_report_refusal($post_id, \phpbb\report\exception\invalid_report_exception $e)
+	{
+		$code = (string) $e->getMessage();
+		if (!preg_match('/^[A-Z][A-Z0-9_]{0,63}$/', $code))
+		{
+			$parts = explode('\\', get_class($e));
+			$code = (string) end($parts);
+		}
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_REPORT_FAILED', false, array((int) $post_id, $code));
+	}
+
+	/**
+	 * The post the extension is reporting right now ({@see report_support}), for the listener
+	 * of `core.report_post_auth`.
+	 *
+	 * @return int The post id, or 0.
+	 */
+	public function reporting()
+	{
+		return $this->reporting;
 	}
 
 	/**

@@ -161,6 +161,18 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
 		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'fail-closed: for a moderator');
 		$this->assertSame(array(), $this->mock_queue(), 'nothing sent, not the title alone');
+
+		// A mark without its base letter (U+FE0F) is no text either, after phpBB's own input
+		// handling (NFC keeps it).
+		$post_id = $this->post_as_author('Minos test mark', "[img]https://example.org/a.png[/img]\u{FE0F}");
+
+		$db = $this->get_db();
+		$result = $db->sql_query('SELECT post_text FROM ' . POSTS_TABLE . ' WHERE post_id = ' . (int) $post_id);
+		$stored = (string) $db->sql_fetchfield('post_text');
+		$db->sql_freeresult($result);
+		$this->assertStringContainsString("\u{FE0F}", $stored, 'phpBB stored the mark');
+		$this->assertSame(array('held', 'empty_text'), array($this->row($post_id)['status'], $this->row($post_id)['error_code']));
+		$this->assertSame(array(), $this->mock_queue(), 'nothing sent');
 	}
 
 	public function test_a_masked_verdict_publishes_the_masked_text(): void
@@ -197,6 +209,80 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->logout();
 		$this->assertStringContainsString('[Minos: zablokowane] Minos test held', $queue);
 		$this->assertStringContainsString('Minos: zablokowane', $details);
+	}
+
+	public function test_a_blocked_post_with_support_is_held_never_deleted(): void
+	{
+		// The plugins' shared rule A7: `wsparcie` is a signal for the moderators, never an
+		// automatic removal, also under the setting that soft-deletes a blocked post.
+		$this->configure();
+		$this->set_config('minos_moderation_blocked', 'delete');
+		$this->subscribe_admin_to_queue_emails();
+
+		$post_id = $this->post_as_author('Minos test support', 'Testowy wpis [minos:blokuj] [minos:kategoria=samookaleczenie]');
+		$this->work();
+		$this->set_config('minos_moderation_blocked', 'hold');
+
+		$this->assertSame(array('held', '1'), array($this->row($post_id)['status'], (string) $this->row($post_id)['support']));
+		$this->assertSame(ITEM_UNAPPROVED, $this->visibility($post_id), 'in the queue, not soft-deleted');
+		$this->assertSame(1, $this->queue_emails('Minos test support'), 'left to the moderators: one e-mail');
+
+		$this->login();
+		$queue = self::request('GET', 'mcp.php?i=queue&mode=unapproved_topics&sid=' . $this->sid)->filter('#main, #page-body')->text();
+		$details = self::request('GET', 'mcp.php?i=queue&mode=approve_details&p=' . $post_id . '&sid=' . $this->sid)->filter('#page-body')->text();
+		$this->logout();
+		$this->assertStringContainsString('[Minos: zablokowane, potrzebne wsparcie] Minos test support', $queue);
+		$this->assertStringContainsString('potrzebne wsparcie', $details);
+	}
+
+	public function test_a_published_post_with_support_stays_published_and_is_reported(): void
+	{
+		// The plugins' shared rule A7: a published post with `wsparcie` is never taken back;
+		// the moderators get a report in the MCP's "Reported posts".
+		$this->configure();
+		$this->set_config('minos_moderation_fail_mode', 'fail-open');
+		$this->set_config('minos_moderation_blocked', 'delete');
+
+		// `bezpieczne` with `wsparcie`, through the mock's signed delivery.
+		$safe = $this->post_as_author('Minos test support safe', 'Testowy wpis [minos:kategoria=samookaleczenie]');
+		$this->work();
+		$this->assertSame(array('published', '1'), array($this->row($safe)['status'], (string) $this->row($safe)['support']));
+
+		// A post the failure mode published (no verdict in time: the mock keeps it silent, the
+		// wait is moved back, phpBB's cron runs the task), then a late `zablokowane` with
+		// `wsparcie`, which without `wsparcie` would delete it under this setting.
+		$late = $this->post_as_author('Minos test support late', 'Testowy wpis o bardzo złym dniu [minos:cisza]');
+		$this->get_db()->sql_query('UPDATE phpbb_minos_pending SET submitted_at = submitted_at - 3600 WHERE post_id = ' . (int) $late);
+		$this->set_config('minos_moderation_last_sweep', '0');
+		self::request('GET', 'app.php/cron/cron.task.minos.moderation.sweeper', array(), false);
+		$this->wait_for_status($late, 'published');
+		$this->assertSame(ITEM_APPROVED, $this->visibility($late), 'published by the failure mode');
+		$answer = $this->deliver(json_encode(array('id' => 'phpbb:' . $late, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane',
+			'kategorie' => array('samookaleczenie'), 'ocenzurowany' => null, 'wsparcie' => true, 'wersja' => '0000000000000000')));
+		$this->set_config('minos_moderation_fail_mode', 'fail-closed');
+		$this->set_config('minos_moderation_blocked', 'hold');
+
+		$this->assertSame(200, $answer['status']);
+		$this->assertSame(array('published', 'zablokowane'), array($this->row($late)['status'], $this->row($late)['verdict']));
+		foreach (array($safe => 'Testowy wpis', $late => 'Testowy wpis o bardzo złym dniu') as $post_id => $text)
+		{
+			$this->assertSame(ITEM_APPROVED, $this->visibility($post_id), 'still published');
+			$this->assertStringContainsString($text, self::request('GET', 'viewtopic.php?p=' . $post_id)->filter('.postbody')->text(), 'a guest reads it');
+			$reports = $this->reports($post_id);
+			$this->assertCount(1, $reports, 'one report');
+			$this->assertSame(array(ANONYMOUS, 0), array((int) $reports[0]['user_id'], (int) $reports[0]['report_closed']));
+			$this->assertStringNotContainsString('Testowy wpis', $reports[0]['report_text'], 'the extension\'s text, not the post\'s');
+		}
+
+		// What the moderator sees in the MCP's "Reported posts" (prosilver).
+		$this->login();
+		$list = self::request('GET', 'mcp.php?i=reports&mode=reports&sid=' . $this->sid)->filter('#page-body')->text();
+		$details = self::request('GET', 'mcp.php?i=reports&mode=report_details&r=' . (int) $this->reports($late)[0]['report_id'] . '&sid=' . $this->sid)
+			->filter('#page-body')->text();
+		$this->logout();
+		$this->assertStringContainsString('Minos test support safe', $list);
+		$this->assertStringContainsString('Minos test support late', $list);
+		$this->assertStringContainsString('Minos: potrzebne wsparcie — werdykt „zablokowane” po publikacji bez oceny', $details);
 	}
 
 	public function test_a_forged_or_stale_delivery_is_refused_and_traced_for_the_acp(): void
@@ -521,6 +607,35 @@ class moderation_test extends \phpbb_functional_test_case
 		$db = $this->get_db();
 		$db->sql_query('UPDATE ' . CONFIG_TABLE . " SET config_value = '" . $db->sql_escape($value) . "' WHERE config_name = '" . $db->sql_escape($name) . "'");
 		$this->purge_cache();
+	}
+
+	/**
+	 * Waits for work done after a response (phpBB runs a cron task on `kernel.terminate`).
+	 *
+	 * @param int    $post_id
+	 * @param string $status The extension's row status to wait for.
+	 * @return void
+	 */
+	protected function wait_for_status($post_id, $status)
+	{
+		for ($i = 0; $i < 100 && $this->row($post_id)['status'] !== $status; $i++)
+		{
+			usleep(100000);
+		}
+		$this->assertSame($status, $this->row($post_id)['status']);
+	}
+
+	/**
+	 * @param int $post_id
+	 * @return array<int,array<string,string>> phpBB's reports of the post.
+	 */
+	protected function reports($post_id)
+	{
+		$db = $this->get_db();
+		$result = $db->sql_query('SELECT * FROM ' . REPORTS_TABLE . ' WHERE post_id = ' . (int) $post_id . ' ORDER BY report_id');
+		$rows = $db->sql_fetchrowset($result);
+		$db->sql_freeresult($result);
+		return $rows;
 	}
 
 	/**

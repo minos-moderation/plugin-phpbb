@@ -63,7 +63,7 @@ dzieje się z nimi po ponownym włączeniu — patrz „Wyłączenie”.
 | Tryb awarii | **fail-closed** | Co zrobić z postem bez werdyktu — patrz „Tryb awarii”. |
 | Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
-| Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). |
+| Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). Post z sygnałem `wsparcie` nigdy nie jest usuwany ani cofany automatycznie: nowy zostaje w kolejce, opublikowany zostaje opublikowany i trafia do zgłoszeń moderatorów (patrz „Wsparcie”). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
 | Grupy użytkowników | wszystkie | Oceniane są posty członków zaznaczonych grup (wystarczy jedna z nich); posty pozostałych użytkowników publikują się jak dawniej i nic o nich nie trafia do bramy. Liczy się tylko przyjęte członkostwo (nie prośba o dołączenie); gość należy do grupy gości. Jeśli żadna z zaznaczonych grup już nie istnieje, oceniane są posty wszystkich. Wybieraj grupy, z których użytkownik nie wystąpi sam (specjalne grupy phpBB, zamknięte, ukryte): z grupy otwartej członek może wystąpić w swoim panelu i od tej chwili pisać bez oceny — lista w ustawieniach oznacza takie grupy. |
 
@@ -110,9 +110,9 @@ pojedynczy komunikat nie musi oznaczać błędu ustawień.
 
    | Werdykt | Post do 3000 znaków | Post dłuższy (oceniony tylko początek) |
    |---|---|---|
-   | `bezpieczne` | publikacja | tryb awarii, jak przy `nieocenione` |
-   | `ocenzurowane` | publikacja tekstu z zamaskowanymi fragmentami (bez formatowania; oryginał zostaje w tabeli rozszerzenia przez 30 dni, potem jest usuwany) albo kolejka — wg ustawienia; bez zamaskowanego tekstu zawsze kolejka | zawsze kolejka |
-   | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia | tak samo |
+   | `bezpieczne` | publikacja; z `wsparcie` publikacja i zgłoszenie w panelu moderatora („Zgłoszone posty”) | tryb awarii, jak przy `nieocenione` |
+   | `ocenzurowane` | publikacja tekstu z zamaskowanymi fragmentami (bez formatowania; oryginał zostaje w tabeli rozszerzenia przez 30 dni, potem jest usuwany) albo kolejka — wg ustawienia; bez zamaskowanego tekstu zawsze kolejka; post opublikowany z `wsparcie` dostaje też zgłoszenie w panelu moderatora | zawsze kolejka |
+   | `zablokowane` | kolejka albo miękkie usunięcie — wg ustawienia; z `wsparcie` zawsze kolejka | tak samo |
    | `nieocenione` | tryb awarii | tryb awarii |
 
    Zamaskowany tekst zastępuje treść postu tylko wtedy, gdy ma dokładnie tyle znaków co
@@ -167,7 +167,8 @@ tryb awarii:
   moderatorów i na liście w ustawieniach jako „opublikowany bez oceny”). Jeśli werdykt
   przyjdzie później, rozszerzenie go zastosuje: `zablokowane` cofa post do kolejki (albo
   usuwa go miękko, zgodnie z ustawieniem), `ocenzurowane` maskuje go albo cofa do kolejki,
-  `bezpieczne` potwierdza publikację. Jeśli jednak moderator w międzyczasie coś z postem
+  `bezpieczne` potwierdza publikację. Post z `wsparcie` nigdy nie jest cofany ani usuwany:
+  zostaje opublikowany, a moderatorzy dostają zgłoszenie (patrz „Wsparcie”). Jeśli jednak moderator w międzyczasie coś z postem
   zrobił (usunął, przywrócił, zatwierdził), zostaje decyzja człowieka.
 
 Post zostawiony w kolejce przez tryb fail-closed również przyjmie spóźniony werdykt, o ile
@@ -273,7 +274,8 @@ bez wysyłania czegokolwiek do bramy; w panelu moderatora ma notatkę „brak te
 Tak jest z postem, którego czytelnik widzi tylko obrazek (`[img]`, także `[img=…]`, nawet z
 podpisem), załącznik, film albo link bez widocznego opisu (`[url=…] [/url]`), z samym
 formatowaniem wokół spacji (np. `[b] [/b]`), z samymi znakami niewidocznymi dla czytelnika
-(np. spacja o zerowej szerokości, miękki dywiz — także obok obrazka albo w opisie linku) i z
+(np. spacja o zerowej szerokości, miękki dywiz, samotny znak łączący bez litery, pusty znak
+Braille'a — także obok obrazka albo w opisie linku) i z
 nowym tematem albo odpowiedzią z własnym
 tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
 jest zwykłym tekstem: post zostaje wysłany i oceniony.
@@ -291,10 +293,25 @@ werdykt liczy się tylko ocena nowej wersji.
 ## Wsparcie
 
 Gdy brama zaznaczy `wsparcie` (treść może świadczyć o samookaleczeniu lub kryzysie autora),
-rozszerzenie zapisuje to przy poście niezależnie od werdyktu: w dzienniku moderatorów, na
-liście ostatnich postów w ustawieniach oraz w kolejce do zatwierdzenia w panelu moderatora
-(oznaczenie przy temacie i opis nad treścią posta). To sygnał, by okazać wsparcie, a nie
-podstawa do kary.
+rozszerzenie zapisuje to przy poście niezależnie od werdyktu, w dzienniku moderatorów i na
+liście ostatnich postów w ustawieniach, i daje moderatorom znak w ich własnej kolejce. To
+sygnał, by okazać wsparcie, a nie podstawa do kary: rozszerzenie nigdy nie usuwa, nie cofa
+ani nie ukrywa postu z `wsparcie` — decyzję podejmuje człowiek. Nigdy też nie pisze do autora
+postu.
+
+- **Post czekający w kolejce do zatwierdzenia** (np. werdykt `zablokowane`, także przy
+  ustawieniu „Usuń miękko”) zostaje w niej, z oznaczeniem przy temacie i opisem nad treścią
+  posta w panelu moderatora; moderatorzy dostają e-mail o poście w kolejce.
+- **Post opublikowany** (werdykt `bezpieczne`, opublikowany zamaskowany tekst, a także post
+  opublikowany wcześniej w trybie fail-open, na który przychodzi spóźniony werdykt — również
+  `zablokowane`) zostaje opublikowany, a rozszerzenie zgłasza go moderatorom: zgłoszenie
+  z powodem „Inne” i tekstem „Minos: potrzebne wsparcie — werdykt …” pojawia się w panelu
+  moderatora w „Zgłoszonych postach”, a phpBB powiadamia o nim moderatorów jak o każdym
+  zgłoszeniu. Zgłaszającym jest gość (Anonymous); tekst zgłoszenia nie zawiera treści postu.
+  Post, który ma już otwarte zgłoszenie (np. od użytkownika), nie dostaje drugiego: phpBB na
+  to nie pozwala, a moderatorzy i tak mają go w kolejce zgłoszeń. Gdy phpBB odrzuci zgłoszenie
+  z innego powodu (np. dodatkowe sprawdzenie innego rozszerzenia), post zostaje opublikowany,
+  a dziennik błędów w panelu administracyjnym dostaje wpis z numerem postu i kodem odmowy.
 
 ## Zadanie cron
 
@@ -303,8 +320,9 @@ czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpow
 „poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
 wpisy 30 dni po rozstrzygnięciu: z wpisem znikają zapisany werdykt i oryginał zamaskowanego
 postu (to wszystkie dane, które rozszerzenie przechowuje o poście). Wpisy w dzienniku
-moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) zostają: to rejestr
-forum, przechowywany według zasad forum. Na forach o małym
+moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) i zgłoszenia
+rozszerzenia w panelu moderatora (z kopią postu, którą phpBB zachowuje przy każdym
+zgłoszeniu) zostają: to rejestry forum, przechowywane według zasad forum. Na forach o małym
 ruchu warto uruchamiać cron phpBB z systemu (`bin/phpbbcli.php cron:run`), bo cron
 wywoływany odsłonami stron może się opóźniać.
 

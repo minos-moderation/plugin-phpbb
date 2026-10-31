@@ -568,6 +568,46 @@ final class WebhookTest extends TestCase
 	}
 
 	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public function blockedSettings(): array
+	{
+		return array('hold' => array(settings::HOLD), 'delete' => array(settings::BLOCKED_DELETE));
+	}
+
+	/**
+	 * @dataProvider blockedSettings
+	 */
+	public function testABlockedPostWithSupportIsHeldForTheModeratorsAndNeverDeleted(string $blocked): void
+	{
+		// The plugins' shared rule A7: `wsparcie` is a signal for the moderators, never an
+		// automatic removal. Under "Usuń miękko" such a post used to be soft-deleted.
+		$this->board->configure(array(settings::BLOCKED => $blocked));
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$notified = count($this->board->notifications->calls);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'zablokowane', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true))));
+
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'still in the approval queue');
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->visibility->calls, 'never deleted');
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_POST_DELETED'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_HELD'));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		$kinds = array_unique(array_column(array_slice($this->board->notifications->calls, $notified), 1));
+		self::assertSame(array('notification.type.topic_in_queue'), array_values($kinds),
+			'the moderators are told of the post in their queue, and nobody else of anything');
+
+		$queue = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
+		$this->board->listener->mark_queue_row($queue);
+		self::assertStringContainsString('potrzebne wsparcie', $queue['post_row']['POST_SUBJECT'], 'the mark on the queue row');
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertTrue($details['post_data']['S_MINOS_SUPPORT'], 'the note above the post');
+		self::assertSame('samookaleczenie', $details['post_data']['MINOS_CATEGORIES'], 'the categories above the post');
+	}
+
+	/**
 	 * @return array<string,array{0:string,1:int,2:string}>
 	 */
 	public function failureModes(): array
@@ -607,26 +647,210 @@ final class WebhookTest extends TestCase
 		self::assertSame($status, $this->board->row($id)['status']);
 	}
 
-	public function testSupportIsFlaggedAndShownInTheModeratorQueue(): void
+	public function testASafePostWithSupportIsPublishedAndReportedToItsModerators(): void
 	{
+		// The plugins' shared rule A7: an active signal in the moderators' own queue. A
+		// published post is not in the approval queue, so it is a report in the MCP's
+		// "Reported posts" (before, only the moderator log said so).
 		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->as_the_webhooks_guest();
+		$notified = count($this->board->notifications->calls);
 
 		$this->board->deliver(self::verdict($id, 'bezpieczne', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true)));
 
 		$row = $this->board->row($id);
-		self::assertSame('1', $row['support']);
-		self::assertSame('samookaleczenie', $row['categories']);
+		self::assertSame(array('1', 'samookaleczenie'), array($row['support'], $row['categories']));
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'support is a cue, not a verdict');
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports, 'one report');
+		self::assertSame(array((string) ANONYMOUS, '4', '0'), array($reports[0]['user_id'], $reports[0]['reason_id'], $reports[0]['report_closed']),
+			'filed by the guest, reason "other", open');
+		self::assertStringContainsString('potrzebne wsparcie', $reports[0]['report_text']);
+		self::assertStringContainsString('bezpieczne', $reports[0]['report_text']);
+		self::assertStringNotContainsString('złym dniu', $reports[0]['report_text'], 'the extension\'s text, never the post\'s');
+		self::assertSame('1', $this->board->post($id)['post_reported']);
+		self::assertContains(array('add', 'notification.type.report_post', $id), array_slice($this->board->notifications->calls, $notified),
+			'phpBB tells the moderators of the report');
+		self::assertSame(array(ANONYMOUS), $this->board->reports->notified_as);
+		self::assertSame(array(ANONYMOUS), $this->board->auth->loaded_for, 'the guest\'s request needs no change of user');
+	}
 
-		$queue = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
-		$this->board->listener->mark_queue_row($queue);
-		self::assertStringContainsString('potrzebne wsparcie', $queue['post_row']['POST_SUBJECT']);
+	public function testAPublishedMaskWithSupportIsReportedToo(): void
+	{
+		$id = $this->pending('To jest brzydkie słowo w teście.');
+		$title = $this->board->title($id);
 
-		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
-		$this->board->listener->show_queue_details($details);
-		self::assertTrue($details['post_data']['S_MINOS_SUPPORT']);
-		self::assertSame('samookaleczenie', $details['post_data']['MINOS_CATEGORIES']);
+		$this->board->deliver(self::verdict($id, 'ocenzurowane', array(
+			'kategorie'    => array('samookaleczenie'),
+			'wsparcie'     => true,
+			'ocenzurowany' => $title . "\n\nTo jest ████████ słowo w teście.",
+		)));
+
+		self::assertSame(pending_store::MASKED, $this->board->row($id)['status']);
+		self::assertCount(1, $this->board->reports->of($id));
+	}
+
+	public function testARepeatedDeliveryWithSupportFilesOneReport(): void
+	{
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$payload = self::verdict($id, 'bezpieczne', array('kategorie' => array('samookaleczenie'), 'wsparcie' => true));
+
+		self::assertSame(200, $this->board->deliver($payload));
+		self::assertSame(200, $this->board->deliver($payload));
+
+		self::assertCount(1, $this->board->reports->of($id));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+	}
+
+	public function testAPostSomeoneReportedAlreadyIsNotReportedAgain(): void
+	{
+		// phpBB refuses a second open report of a post: the moderators have one in their queue.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->board->auth->local['f_list'][Board::FORUM] = true;
+		$this->board->auth->local['f_read'][Board::FORUM] = true;
+		$this->board->auth->local['f_report'][Board::FORUM] = true;
+		$this->board->reports->add_report($id, 2, '', 0);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true))));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(array((string) Board::USER), array_column($this->board->reports->of($id), 'user_id'), 'the member\'s report only');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_SUPPORT_REPORT_FAILED'), 'not a failure: the report is there');
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function refusalCodes(): array
+	{
+		return array(
+			'a language key'      => array('NOT_AUTHORISED_BY_ANOTHER_EXTENSION', 'NOT_AUTHORISED_BY_ANOTHER_EXTENSION'),
+			'not a language key'  => array('Odmowa z opisem, który mógłby cokolwiek zawierać', 'report_permission_denied_exception'),
+		);
+	}
+
+	/**
+	 * @dataProvider refusalCodes
+	 */
+	public function testAReportAnotherExtensionRefusesIsInTheErrorLogAndThePostStaysPublished(string $message, string $code): void
+	{
+		// Review of #8, minor 2: another extension's listener of core.report_post_auth, run after
+		// this one, adds a check the guest fails; the signal must not vanish without a trace.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$ours = $this->board->reports->on_auth;
+		$this->board->reports->on_auth = static function (\phpbb\event\data $event) use ($ours, $message) {
+			call_user_func($ours, $event);
+			$checks = $event['acl_check_ary'];
+			$checks['u_minos_test_other_extension'] = $message;
+			$event['acl_check_ary'] = $checks;
+		};
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true))));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'published all the same');
+		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
+		self::assertSame(array(), $this->board->reports->of($id));
+		$failures = $this->board->log->of('LOG_MINOS_SUPPORT_REPORT_FAILED');
+		self::assertCount(1, $failures, 'the lost signal is in the error log');
+		self::assertSame(array('critical', array($id, $code)), array($failures[0]['mode'], $failures[0]['data']),
+			'the post and phpBB\'s code, nothing of its text');
+	}
+
+	public function testOnlyTheExtensionsOwnReportSkipsPhpbbsPermissionCheck(): void
+	{
+		// The board's users have no `f_report` here, as phpBB's guests by default.
+		$id = $this->pending();
+
+		try
+		{
+			$this->board->reports->add_report($id, 4, 'Zgłoszenie testowe', 0);
+			self::fail('a report without f_report is refused');
+		}
+		catch (\phpbb\report\exception\report_permission_denied_exception $e)
+		{
+			// phpBB's own refusal of a reporter without the forum's permissions.
+		}
+		self::assertSame(array(), $this->board->reports->of($id));
+		self::assertSame(0, $this->board->forum->reporting(), 'the extension is reporting nothing now');
+	}
+
+	public function testTheOwnReportOpensPhpbbsCheckForItsPostOnly(): void
+	{
+		// Review of #8, minor 1: while the extension files its report, a report of another post
+		// (here by a listener of the report's notification) is checked as phpBB checks it.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$other = $this->pending();
+		$board = $this->board;
+		$previous = $board->notifications->on_add;
+		$refused = false;
+		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board, $previous, $other, &$refused) {
+			call_user_func($previous, $event);
+			if ($event['notification_type_name'] !== 'notification.type.report_post')
+			{
+				return;
+			}
+			try
+			{
+				$board->reports->add_report($other, 4, 'Zgłoszenie testowe', 0);
+			}
+			catch (\phpbb\report\exception\report_permission_denied_exception $e)
+			{
+				$refused = true;
+			}
+		};
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true)));
+
+		self::assertCount(1, $this->board->reports->of($id), 'the extension\'s own report');
+		self::assertTrue($refused, 'the other post\'s report met phpBB\'s check');
+		self::assertSame(array(), $this->board->reports->of($other));
+	}
+
+	public function testAReportThatFailsLeavesPhpbbsCheckClosedAndTheUserRestored(): void
+	{
+		// Review of #8, minor 1: whatever add_report() throws, the extension stops reporting.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->board->user->data = array('user_id' => Board::USER, 'user_permissions' => '');
+		$this->board->reports->fail_with = new \RuntimeException('a database error');
+
+		$this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true)));
+		$this->board->reports->fail_with = null;
+
+		self::assertSame(0, $this->board->forum->reporting());
+		self::assertSame(array('user_id' => Board::USER, 'user_permissions' => ''), $this->board->user->data, 'the member, back');
+		self::assertSame(pending_store::RECEIVED, $this->board->row($id)['status'], 'rolled back, for the cron task');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_ROW_FAILED'));
+		try
+		{
+			$this->board->reports->add_report($id, 4, 'Zgłoszenie testowe', 0);
+			self::fail('the member\'s report without f_report is refused');
+		}
+		catch (\phpbb\report\exception\report_permission_denied_exception $e)
+		{
+			// phpBB's own refusal, as before the failed report.
+		}
+		self::assertSame(array(), $this->board->reports->of($id));
+	}
+
+	public function testAVerdictAppliedInAMembersRequestIsReportedAsTheGuestAndTheMemberIsRestored(): void
+	{
+		// The cron task runs in whichever request triggers it, also a member's page view:
+		// phpBB names the request's user as the reporter.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$body = json_encode(self::verdict($id, 'bezpieczne', array('wsparcie' => true)));
+		$controller = new webhook(new Request(array('X-Wergiliusz-Podpis' => Signature::sign(Board::SECRET, $body, time())), $body),
+			$this->board->receiver, $this->board->deferred, $this->board->dispatcher);
+		$controller->handle();
+		$this->board->user->data = array('user_id' => Board::USER, 'user_permissions' => 'a member\'s');
+
+		$this->board->sweeper()->sweep(time());
+
+		self::assertSame(array((string) ANONYMOUS), array_column($this->board->reports->of($id), 'user_id'));
+		self::assertSame(array(ANONYMOUS), $this->board->reports->notified_as, 'the notification names the guest too');
+		self::assertSame(array('user_id' => Board::USER, 'user_permissions' => 'a member\'s'), $this->board->user->data, 'the member, back');
+		self::assertSame(array(ANONYMOUS, Board::USER), $this->board->auth->loaded_for, 'and her permissions, reloaded');
 	}
 
 	public function testAPostAModeratorDealtWithFirstIsLeftAlone(): void
@@ -682,6 +906,14 @@ final class WebhookTest extends TestCase
 
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
+	}
+
+	/**
+	 * The request's user as in a webhook delivery: the guest, with the guest's permissions.
+	 */
+	private function as_the_webhooks_guest(): void
+	{
+		$this->board->user->data = array('user_id' => ANONYMOUS, 'user_permissions' => '');
 	}
 
 	/**

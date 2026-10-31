@@ -30,6 +30,7 @@ $lang = array_merge($lang, array(
 	'MINOS_PROBLEM_WEBHOOK_SECRET' => 'brak poprawnego sekretu webhooka',
 
 	'LOG_MINOS_SETTINGS_UPDATED' => '<strong>Zmieniono ustawienia rozszerzenia Minos</strong>',
+	'LOG_MINOS_SUPPORT_REPORT_FAILED' => '<strong>Minos: nie udało się zgłosić moderatorom postu z sygnałem wsparcia</strong><br />» post %1$s, kod %2$s; post pozostaje opublikowany, sygnał widać w dzienniku moderatorów',
 	'LOG_MINOS_ROW_FAILED'       => '<strong>Minos: nie udało się obsłużyć postu</strong><br />» krok %1$s, post %2$s; ponowna próba w kolejnym przebiegu zadania cron',
 	'LOG_MINOS_GATEWAY_REFUSED'  => '<strong>Minos: brama odrzuciła żądanie</strong><br />» HTTP %1$s, kod %2$s',
 	'LOG_MINOS_POST_PUBLISHED'   => '<strong>Minos opublikował post</strong><br />» %s',
@@ -39,5 +40,6 @@ $lang = array_merge($lang, array(
 	'LOG_MINOS_POST_MASKED'      => '<strong>Minos opublikował post z zamaskowanymi fragmentami</strong><br />» %s',
 	'LOG_MINOS_POST_HELD'        => '<strong>Minos zostawił post w kolejce do zatwierdzenia</strong><br />» %s',
 	'LOG_MINOS_POST_DELETED'     => '<strong>Minos usunął post (miękko)</strong><br />» %s',
+	'LOG_MINOS_POST_LEFT_PUBLISHED' => '<strong>Minos zostawił opublikowany post do decyzji moderatora (potrzebne wsparcie) mimo werdyktu po publikacji</strong><br />» %s',
 	'LOG_MINOS_SUPPORT'          => '<strong>Minos: autor może potrzebować wsparcia</strong><br />» %s',
 ));

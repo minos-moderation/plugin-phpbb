@@ -131,6 +131,8 @@ final class MockGatewayTest extends TestCase
 		self::assertSame(ITEM_UNAPPROVED, (int) $board->post($posts['forged'])['post_visibility']);
 
 		self::assertSame('1', $board->row($posts['support'])['support']);
+		self::assertSame(array((string) ANONYMOUS), array_column($board->reports->of($posts['support']), 'user_id'),
+			'published with wsparcie: one report for its moderators, by the guest (A7)');
 
 		$statuses = array();
 		foreach (file($deliveries, FILE_IGNORE_NEW_LINES) ?: array() as $line)
