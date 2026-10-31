@@ -604,6 +604,7 @@ final class WebhookTest extends TestCase
 		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
 		$this->board->listener->show_queue_details($details);
 		self::assertTrue($details['post_data']['S_MINOS_SUPPORT'], 'the note above the post');
+		self::assertSame('samookaleczenie', $details['post_data']['MINOS_CATEGORIES'], 'the categories above the post');
 	}
 
 	/**
