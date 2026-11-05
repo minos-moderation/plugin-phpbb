@@ -274,6 +274,37 @@ final class ListenerTest extends TestCase
 		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
 	}
 
+	/**
+	 * @return array<string,array{0:string,1:string,2:int,3:string}>
+	 */
+	public function lonelyMarks(): array
+	{
+		// Marks with no base letter, as the whole text (F7: `\p{M}` is invisible on its own):
+		// U+034F, U+FE0F, a combining acute U+0301 and an enclosing circle U+20DD (`\p{Me}`).
+		$cases = array();
+		foreach (array('U+034F' => "\u{034F}", 'U+FE0F' => "\u{FE0F}", 'U+0301 and U+20DD' => "\u{0301}\u{20DD}", 'U+FE0F between spaces' => " \u{FE0F} ") as $name => $text)
+		{
+			$cases[$name . ', fail-closed'] = array($text, settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD);
+			$cases[$name . ', fail-open'] = array($text, settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED);
+		}
+		return $cases;
+	}
+
+	/**
+	 * @dataProvider lonelyMarks
+	 */
+	public function testAPostOfMarksWithoutABaseLetterGoesToTheFailureModeUnsent(string $text, string $mode, int $visibility, string $status): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+
+		$id = $this->board->posting('', 'reply', array('xml' => $this->board->xml($text), 'topic_id' => $this->topic()))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'nothing a reader reads: no request');
+		$row = $this->board->row($id);
+		self::assertSame(array($status, 'empty_text'), array($row['status'], $row['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
 	public function testALetterWithItsCombiningMarkIsTextAndIsSent(): void
 	{
 		// The control for the marks above: a mark beside its base letter is part of the text.
