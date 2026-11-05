@@ -525,19 +525,18 @@ class forum
 	 */
 	public function meta(array $post)
 	{
-		$xml = (string) $post['post_text'];
+		list($count, $urls) = self::links_of((string) $post['post_text']);
 		$domains = array();
-		preg_match_all('#<URL\s[^>]*?url="([^"]*)"#', $xml, $found);
-		foreach ($found[1] as $url)
+		foreach ($urls as $url)
 		{
-			$domain = self::registrable_domain((string) parse_url(html_entity_decode($url, ENT_QUOTES | ENT_XML1, 'UTF-8'), PHP_URL_HOST));
+			$domain = self::registrable_domain((string) parse_url($url, PHP_URL_HOST));
 			if ($domain !== null && count($domains) < self::MAX_LINK_DOMAINS)
 			{
 				$domains[$domain] = $domain;
 			}
 		}
 		$meta = array(
-			'links'        => min(self::MAX_LINKS, (int) preg_match_all(self::LINK_PATTERN, $xml)),
+			'links'        => min(self::MAX_LINKS, $count),
 			'link_domains' => array_values($domains),
 		);
 		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
@@ -546,6 +545,57 @@ class forum
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
+	}
+
+	/**
+	 * The links of a stored text: phpBB's `<URL>` elements, each a `[url]` or an address phpBB
+	 * linked by itself. One inside an image, a video or an attachment ({@see MEDIA_ELEMENTS})
+	 * is that medium's address, which phpBB links inside `[img]` too: the reader sees an image,
+	 * not a link, so it is neither counted nor its domain listed (the plugins' shared rules S2
+	 * and F7). A linked image (`[url=X][img]Y[/img][/url]`) is a link to X. A stored text that
+	 * is not phpBB's XML (phpBB 3.0's storage) has every `<URL` counted: more signals, never
+	 * fewer.
+	 *
+	 * @param string $xml The stored text (`post_text`).
+	 * @return array{0:int,1:array<int,string>} How many links, and their addresses.
+	 */
+	protected static function links_of($xml)
+	{
+		$dom = new \DOMDocument();
+		$errors = libxml_use_internal_errors(true);
+		$loaded = ($xml !== '') && $dom->loadXML($xml, LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE);
+		libxml_clear_errors();
+		libxml_use_internal_errors($errors);
+		$links = false;
+		if ($loaded && $dom->documentElement !== null && $dom->doctype === null)
+		{
+			$media = array();
+			foreach (self::MEDIA_ELEMENTS as $name)
+			{
+				$media[] = 'ancestor::' . $name;
+			}
+			$xpath = new \DOMXPath($dom);
+			$links = $xpath->query('//URL[not(' . implode(' or ', $media) . ')]');
+		}
+		if ($links === false)
+		{
+			preg_match_all('#<URL\s[^>]*?url="([^"]*)"#', $xml, $found);
+			$urls = array();
+			foreach ($found[1] as $url)
+			{
+				$urls[] = html_entity_decode($url, ENT_QUOTES | ENT_XML1, 'UTF-8');
+			}
+			return array((int) preg_match_all(self::LINK_PATTERN, $xml), $urls);
+		}
+		$urls = array();
+		foreach ($links as $link)
+		{
+			if ($link instanceof \DOMElement && $link->hasAttribute('url'))
+			{
+				$urls[] = $link->getAttribute('url');
+			}
+		}
+		return array($links->length, $urls);
 	}
 
 	/**

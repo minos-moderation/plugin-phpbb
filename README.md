@@ -241,7 +241,9 @@ Do bramy trafia wyłącznie:
   awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
-  pierwszy post autora (dla gości — nie).
+  pierwszy post autora (dla gości — nie). Adres obrazka (`[img]`) ani filmu (`[flash]`) nie
+  jest linkiem: nie jest liczony ani wysyłany; obrazek, który sam jest linkiem
+  (`[url=…][img]…[/img][/url]`), liczy się jako link do adresu z `[url]`.
 
 **Nigdy** nie są wysyłane dane konta autora: jego adres e-mail, adres IP, identyfikator ani
 login. Jedyne imiona i nazwy, które opuszczają forum, to te, które autor sam wpisał w treść
