@@ -96,6 +96,22 @@ final class MockGatewayTest extends TestCase
 			self::assertSame(pending_store::PENDING, $board->row($posts[$name])['status'], "{$name}: accepted by the mock");
 		}
 
+		// A7 after a person's decision (the owner's decision of 2026-11-01): a moderator approves
+		// a waiting post, or edits it, before the verdict with `wsparcie` arrives - twice.
+		foreach (array('approved_support', 'approved_plain', 'edited_support') as $name)
+		{
+			$text = 'Testowy wpis [minos:blokuj] [minos:dwa-razy]' . (($name === 'approved_plain') ? '' : ' [minos:kategoria=samookaleczenie]');
+			$posts[$name] = $board->posting($text)['post_id'];
+			self::assertSame(pending_store::PENDING, $board->row($posts[$name])['status'], "{$name}: accepted by the mock");
+		}
+		foreach (array('approved_support', 'approved_plain') as $name)
+		{
+			$board->visibility->set_post_visibility(ITEM_APPROVED, array($posts[$name]), 100, Board::FORUM, 5, time(), '', true, true);
+		}
+		$board->edit($posts['edited_support'], 'Poprawiony wpis testowy.');
+		self::assertSame(array('1', pending_store::PENDING), array($board->row($posts['edited_support'])['revision'], $board->row($posts['edited_support'])['status']),
+			'edited_support: the new text accepted by the mock');
+
 		// Two passes: the second delivers the repeat of [minos:dwa-razy].
 		$this->work();
 		$this->work();
@@ -134,11 +150,29 @@ final class MockGatewayTest extends TestCase
 		self::assertSame(array((string) ANONYMOUS), array_column($board->reports->of($posts['support']), 'user_id'),
 			'published with wsparcie: one report for its moderators, by the guest (A7)');
 
+		foreach (array('approved_support', 'approved_plain') as $name)
+		{
+			self::assertSame(array(ITEM_APPROVED, pending_store::SUPERSEDED), array((int) $board->post($posts[$name])['post_visibility'], $board->row($posts[$name])['status']),
+				"{$name}: the moderator's approval stands");
+		}
+		$reports = $board->reports->of($posts['approved_support']);
+		self::assertCount(1, $reports, 'approved_support: one report for two deliveries');
+		self::assertStringContainsString('po decyzji moderatora', $reports[0]['report_text']);
+		self::assertSame(array(), $board->reports->of($posts['approved_plain']), 'approved_plain: no wsparcie, no report');
+		self::assertCount(1, $board->reports->of($posts['edited_support']), 'edited_support: the earlier text\'s wsparcie, reported once');
+		self::assertSame(array(ITEM_APPROVED, pending_store::PUBLISHED),
+			array((int) $board->post($posts['edited_support'])['post_visibility'], $board->row($posts['edited_support'])['status']),
+			'edited_support: the new text\'s own verdict');
+
 		$statuses = array();
 		foreach (file($deliveries, FILE_IGNORE_NEW_LINES) ?: array() as $line)
 		{
 			$delivery = json_decode($line, true);
 			$statuses[$delivery['id']][] = $delivery['status'];
+		}
+		foreach (array('approved_support', 'approved_plain', 'edited_support') as $name)
+		{
+			self::assertSame(array(200, 200), $statuses['phpbb:' . $posts[$name]], "{$name}: delivered twice, answered 200 twice");
 		}
 		self::assertSame(array(200, 200), $statuses['phpbb:' . $posts['twice']], 'delivered twice, answered 200 twice');
 		self::assertSame(array(401), $statuses['phpbb:' . $posts['forged']]);

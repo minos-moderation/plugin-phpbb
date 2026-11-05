@@ -10,6 +10,7 @@ use minos\moderation\migrations\install_schema;
 use minos\moderation\migrations\queue_notice;
 use minos\moderation\migrations\shared_pause;
 use minos\moderation\migrations\signature_trace;
+use minos\moderation\migrations\support_signal;
 use minos\moderation\migrations\user_groups;
 use minos\moderation\migrations\verdict_times;
 use minos\moderation\service\settings;
@@ -97,6 +98,7 @@ final class ExtensionTest extends TestCase
 		self::assertNull($settings->rejections(), 'no refused signature yet');
 		self::assertTrue($trace->effectively_installed());
 		self::assertSame(array('\minos\moderation\migrations\queue_notice'), signature_trace::depends_on());
+		self::assertSame(array('\minos\moderation\migrations\signature_trace'), support_signal::depends_on(), 'the last in the chain');
 		self::assertSame(array(array('config.add', array(settings::SIGNATURE_REJECTED, '', true))), $trace->update_data(),
 			'dynamic: a refused delivery writes it, and must not empty phpBB\'s config cache');
 		self::assertTrue($pause->effectively_installed());

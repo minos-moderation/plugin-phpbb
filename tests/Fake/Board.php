@@ -8,6 +8,7 @@ use minos\moderation\event\deferred_verdicts;
 use minos\moderation\event\listener;
 use minos\moderation\migrations\install_schema;
 use minos\moderation\migrations\queue_notice;
+use minos\moderation\migrations\support_signal;
 use minos\moderation\migrations\verdict_times;
 use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
@@ -168,7 +169,7 @@ class Board
 		$board->transport = $transport ?: new RecordingTransport();
 		$board->applier = new verdict_applier($board->settings, $board->store, $board->forum, $board->db);
 		$board->submitter = new submitter($board->settings, $board->store, $board->forum, $board->transport, $board->applier);
-		$board->receiver = new receiver($board->settings, $board->store);
+		$board->receiver = new receiver($board->settings, $board->store, $board->applier);
 		$board->deferred = new deferred_verdicts($board->applier, $board->forum);
 		$board->dispatcher = new RecordingDispatcher();
 		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
@@ -611,7 +612,7 @@ class Board
 				$this->db->pdo->exec('CREATE INDEX ' . $table . '_' . $name . ' ON ' . $table . ' (' . implode(', ', (array) $key[1]) . ')');
 			}
 		}
-		foreach (array(verdict_times::class, queue_notice::class) as $class)
+		foreach (array(verdict_times::class, queue_notice::class, support_signal::class) as $class)
 		{
 			$later = new $class(new \phpbb\config\config(), $this->db, null, './', 'php', self::PREFIX);
 			$changes = $later->update_schema();
@@ -673,7 +674,7 @@ class Board
 	{
 		$this->applier = new verdict_applier($this->settings, $this->store, $this->forum, $this->db);
 		$this->submitter = new submitter($this->settings, $this->store, $this->forum, $this->transport, $this->applier);
-		$this->receiver = new receiver($this->settings, $this->store);
+		$this->receiver = new receiver($this->settings, $this->store, $this->applier);
 		$this->deferred = new deferred_verdicts($this->applier, $this->forum);
 		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language, $this->user);
 	}

@@ -807,9 +807,12 @@ class forum
 	 * @param string              $verdict The gateway's verdict, named in the report.
 	 * @param bool                $late    Whether the verdict came after the failure mode
 	 *     published the post.
+	 * @param bool                $after_decision Whether the verdict came after a person
+	 *     decided on the post (or it changed under the extension): the report says so, and that
+	 *     the post's visibility was left as it is.
 	 * @return bool Whether a report was filed.
 	 */
-	public function report_support(array $post, $verdict, $late)
+	public function report_support(array $post, $verdict, $late, $after_decision = false)
 	{
 		$post_id = (int) $post['post_id'];
 		$result = $this->db->sql_query('SELECT reason_id FROM ' . $this->reports_reasons_table . " WHERE LOWER(reason_title) = 'other'");
@@ -823,7 +826,8 @@ class forum
 			return false;
 		}
 		$this->language->add_lang('common', 'minos/moderation');
-		$text = $this->language->lang($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT', (string) $verdict);
+		$key = $after_decision ? 'MINOS_SUPPORT_REPORT_AFTER_DECISION' : ($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT');
+		$text = $this->language->lang($key, (string) $verdict);
 
 		$saved = $this->user->data;
 		$as_guest = (!isset($saved['user_id'], $saved['user_permissions']) || (int) $saved['user_id'] !== ANONYMOUS);
@@ -880,6 +884,19 @@ class forum
 			$code = (string) end($parts);
 		}
 		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_REPORT_FAILED', false, array((int) $post_id, $code));
+	}
+
+	/**
+	 * Writes into the error log that a verdict with `wsparcie` came for a post that is gone (a
+	 * moderator disapproved it, which deletes it, or deleted it for good): nothing is left to
+	 * report. The post's id only.
+	 *
+	 * @param int $post_id The post.
+	 * @return void
+	 */
+	public function log_support_post_gone($post_id)
+	{
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_POST_GONE', false, array((int) $post_id));
 	}
 
 	/**

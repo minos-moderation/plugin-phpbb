@@ -29,7 +29,9 @@ use Minos\Client\WebhookPayload;
  *    delivery is refused: an HMAC keyed with an empty string is one anybody can compute;
  * 3. the payload (`WebhookPayload::parse`): `400` when it is not one; an id this forum does not
  *    wait for (unknown, of an earlier revision, or already handled) gets `200` and nothing
- *    else, because deliveries repeat;
+ *    else, because deliveries repeat - except the `wsparcie` of an earlier revision's verdict
+ *    (the post was edited since), which reaches the moderators once, before the answer
+ *    ({@see verdict_applier::signal_earlier_support}; the plugins' shared rule A7);
  * 4. the outcome is recorded, and applied after the answer is sent.
  */
 class receiver
@@ -43,15 +45,20 @@ class receiver
 	/** @var pending_store */
 	protected $store;
 
+	/** @var verdict_applier */
+	protected $applier;
+
 	/**
-	 * @param settings      $settings The administrator's settings (the webhook secret).
-	 * @param pending_store $store    The pending rows.
+	 * @param settings        $settings The administrator's settings (the webhook secret).
+	 * @param pending_store   $store    The pending rows.
+	 * @param verdict_applier $applier  For the `wsparcie` of an earlier revision's verdict.
 	 */
-	public function __construct(settings $settings, pending_store $store)
+	public function __construct(settings $settings, pending_store $store, verdict_applier $applier)
 	{
 		client_loader::register();
 		$this->settings = $settings;
 		$this->store = $store;
+		$this->applier = $applier;
 	}
 
 	/**
@@ -99,6 +106,12 @@ class receiver
 		$verdict = ($payload['status'] === WebhookPayload::ASSESSED) ? (string) $payload['kwalifikacja'] : WebhookPayload::UNASSESSED;
 		$recorded = $this->store->record_verdict($post_id, $revision, $verdict, $payload['kategorie'],
 			$payload['wsparcie'], $payload['ocenzurowany'], '', (int) $now);
+		if (!$recorded && $payload['wsparcie'])
+		{
+			// Not applied (the post was edited since, or the row moved on), but the signal is
+			// owed whatever the verdict. Before the answer: if it fails, the gateway retries.
+			$this->applier->signal_earlier_support($post_id, $revision, $verdict);
+		}
 
 		return array(200, $recorded ? $post_id : null);
 	}
