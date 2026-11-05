@@ -32,7 +32,9 @@ its backlog item is `minos-moderation/minos#4`. Layout, tests and the verified p
 - phpBB's conventions: tabs, braces on their own line, lower-case class names. Every
   phpBB call on posts goes through `platform/forum.php`.
 - No real posts in tests: use the mock gateway from `minos-moderation/client-php`.
-- Never `git add -A`. Sessions open PRs; only the owner or the coordinating session merges.
+- Never `git add -A` (a hook refuses it). Sessions open PRs; only the owner or the
+  coordinating session merges, after `Review: <agent> @ <head SHA> — AKCEPTACJA`, which CI's
+  `Review trail` requires for any path outside `.github/review-trail/exempt-paths.txt`.
 - Model-pinned agents in `.claude/agents/`, copied from `client-php` and fitted to the
   plugin's paths (`programista-prosty`'s risk list above all).
 - This file stays small (`tests/Repo/ClaudeRulesTest.php` pins its size).
