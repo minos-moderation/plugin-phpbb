@@ -525,19 +525,18 @@ class forum
 	 */
 	public function meta(array $post)
 	{
-		$xml = (string) $post['post_text'];
+		list($count, $urls) = self::links_of((string) $post['post_text']);
 		$domains = array();
-		preg_match_all('#<URL\s[^>]*?url="([^"]*)"#', $xml, $found);
-		foreach ($found[1] as $url)
+		foreach ($urls as $url)
 		{
-			$domain = self::registrable_domain((string) parse_url(html_entity_decode($url, ENT_QUOTES | ENT_XML1, 'UTF-8'), PHP_URL_HOST));
+			$domain = self::registrable_domain((string) parse_url($url, PHP_URL_HOST));
 			if ($domain !== null && count($domains) < self::MAX_LINK_DOMAINS)
 			{
 				$domains[$domain] = $domain;
 			}
 		}
 		$meta = array(
-			'links'        => min(self::MAX_LINKS, (int) preg_match_all(self::LINK_PATTERN, $xml)),
+			'links'        => min(self::MAX_LINKS, $count),
 			'link_domains' => array_values($domains),
 		);
 		if ((int) $post['poster_id'] !== ANONYMOUS && isset($post['user_posts']))
@@ -546,6 +545,57 @@ class forum
 			$meta['author_first_post'] = ((int) $post['user_posts'] === 0);
 		}
 		return $meta;
+	}
+
+	/**
+	 * The links of a stored text: phpBB's `<URL>` elements, each a `[url]` or an address phpBB
+	 * linked by itself. One inside an image, a video or an attachment ({@see MEDIA_ELEMENTS})
+	 * is that medium's address, which phpBB links inside `[img]` too: the reader sees an image,
+	 * not a link, so it is neither counted nor its domain listed (the plugins' shared rules S2
+	 * and F7). A linked image (`[url=X][img]Y[/img][/url]`) is a link to X. A stored text that
+	 * is not phpBB's XML (phpBB 3.0's storage) has every `<URL` counted: more signals, never
+	 * fewer.
+	 *
+	 * @param string $xml The stored text (`post_text`).
+	 * @return array{0:int,1:array<int,string>} How many links, and their addresses.
+	 */
+	protected static function links_of($xml)
+	{
+		$dom = new \DOMDocument();
+		$errors = libxml_use_internal_errors(true);
+		$loaded = ($xml !== '') && $dom->loadXML($xml, LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE);
+		libxml_clear_errors();
+		libxml_use_internal_errors($errors);
+		$links = false;
+		if ($loaded && $dom->documentElement !== null && $dom->doctype === null)
+		{
+			$media = array();
+			foreach (self::MEDIA_ELEMENTS as $name)
+			{
+				$media[] = 'ancestor::' . $name;
+			}
+			$xpath = new \DOMXPath($dom);
+			$links = $xpath->query('//URL[not(' . implode(' or ', $media) . ')]');
+		}
+		if ($links === false)
+		{
+			preg_match_all('#<URL\s[^>]*?url="([^"]*)"#', $xml, $found);
+			$urls = array();
+			foreach ($found[1] as $url)
+			{
+				$urls[] = html_entity_decode($url, ENT_QUOTES | ENT_XML1, 'UTF-8');
+			}
+			return array((int) preg_match_all(self::LINK_PATTERN, $xml), $urls);
+		}
+		$urls = array();
+		foreach ($links as $link)
+		{
+			if ($link instanceof \DOMElement && $link->hasAttribute('url'))
+			{
+				$urls[] = $link->getAttribute('url');
+			}
+		}
+		return array($links->length, $urls);
 	}
 
 	/**
@@ -807,9 +857,12 @@ class forum
 	 * @param string              $verdict The gateway's verdict, named in the report.
 	 * @param bool                $late    Whether the verdict came after the failure mode
 	 *     published the post.
+	 * @param bool                $after_decision Whether the verdict came after a person
+	 *     decided on the post (or it changed under the extension): the report says so, and that
+	 *     the post's visibility was left as it is.
 	 * @return bool Whether a report was filed.
 	 */
-	public function report_support(array $post, $verdict, $late)
+	public function report_support(array $post, $verdict, $late, $after_decision = false)
 	{
 		$post_id = (int) $post['post_id'];
 		$result = $this->db->sql_query('SELECT reason_id FROM ' . $this->reports_reasons_table . " WHERE LOWER(reason_title) = 'other'");
@@ -823,7 +876,8 @@ class forum
 			return false;
 		}
 		$this->language->add_lang('common', 'minos/moderation');
-		$text = $this->language->lang($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT', (string) $verdict);
+		$key = $after_decision ? 'MINOS_SUPPORT_REPORT_AFTER_DECISION' : ($late ? 'MINOS_SUPPORT_REPORT_LATE' : 'MINOS_SUPPORT_REPORT');
+		$text = $this->language->lang($key, (string) $verdict);
 
 		$saved = $this->user->data;
 		$as_guest = (!isset($saved['user_id'], $saved['user_permissions']) || (int) $saved['user_id'] !== ANONYMOUS);
@@ -880,6 +934,19 @@ class forum
 			$code = (string) end($parts);
 		}
 		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_REPORT_FAILED', false, array((int) $post_id, $code));
+	}
+
+	/**
+	 * Writes into the error log that a verdict with `wsparcie` came for a post that is gone (a
+	 * moderator disapproved it, which deletes it, or deleted it for good): nothing is left to
+	 * report. The post's id only.
+	 *
+	 * @param int $post_id The post.
+	 * @return void
+	 */
+	public function log_support_post_gone($post_id)
+	{
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_POST_GONE', false, array((int) $post_id));
 	}
 
 	/**

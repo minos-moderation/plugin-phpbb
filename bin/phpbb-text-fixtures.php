@@ -67,6 +67,9 @@ $corpus = array(
 	'bare-link-only'       => 'https://example.org/a',
 	'attachment-inline'    => '[attachment=0]obrazek.png[/attachment]',
 	'flash'                => '[flash=200,100]https://example.org/a.swf[/flash]',
+	'image-beside-a-link'  => 'Zobacz [url=https://kasyno.example/bonus]stronę[/url] i [img]https://obrazki.example/a.png[/img]',
+	'linked-image'         => 'Tekst [url=https://kasyno.example/bonus][img]https://obrazki.example/a.png[/img][/url]',
+	'flash-beside-text'    => 'Film [flash=200,100]https://filmy.example/a.swf[/flash] koniec',
 	// Characters a reader does not see (\p{Cf}) beside an image, in a link's label, in bold.
 	'image-zwsp'           => "[img]https://example.org/a.png[/img]\u{200B}",
 	'image-shy'            => "[img]https://example.org/a.png[/img]\u{00AD}",

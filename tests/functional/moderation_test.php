@@ -118,7 +118,7 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame('1', (string) $db->sql_fetchfield('ext_active'), 'enabled through the ACP\'s extension manager');
 		$db->sql_freeresult($result);
 		$this->assertTrue($this->tools()->sql_table_exists('phpbb_minos_pending'));
-		$this->assertSame(8, $this->count_rows(MIGRATIONS_TABLE, "migration_name LIKE '%minos%moderation%migrations%'"), 'every migration ran');
+		$this->assertSame(9, $this->count_rows(MIGRATIONS_TABLE, "migration_name LIKE '%minos%moderation%migrations%'"), 'every migration ran');
 		$config = $this->config_rows();
 		$this->assertSame('0', $config['minos_moderation_enabled'][0], 'a fresh installation starts switched off');
 		$this->assertSame('1', $config['minos_moderation_signature_rejected'][1], 'the trace is dynamic, out of the config cache');
@@ -283,6 +283,47 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertStringContainsString('Minos test support safe', $list);
 		$this->assertStringContainsString('Minos test support late', $list);
 		$this->assertStringContainsString('Minos: potrzebne wsparcie — werdykt „zablokowane” po publikacji bez oceny', $details);
+	}
+
+	public function test_support_after_a_moderators_approval_is_reported_once_and_the_approval_stands(): void
+	{
+		// The plugins' shared rule A7, whatever the verdict (the owner's decision of 2026-11-01):
+		// a moderator approves the waiting post in phpBB's own MCP form, then the gateway
+		// delivers `zablokowane` with `wsparcie`, twice.
+		$this->configure();
+		$this->set_config('minos_moderation_blocked', 'delete');
+		$post_id = $this->post_as_author('Minos test support approved', 'Testowy wpis o bardzo złym dniu [minos:cisza]');
+		$this->assertSame('pending', $this->row($post_id)['status']);
+
+		$this->login();
+		$this->add_lang('mcp');
+		$crawler = self::request('GET', 'viewtopic.php?p=' . $post_id . '&sid=' . $this->sid);
+		$crawler = self::submit($crawler->selectButton($this->lang('APPROVE'))->form());
+		$crawler = self::submit($crawler->selectButton($this->lang('YES'))->form());
+		$this->assertContainsLang('TOPIC_APPROVED_SUCCESS', $crawler->text());
+		$this->logout();
+		$this->assertSame(ITEM_APPROVED, $this->visibility($post_id), 'approved by the moderator');
+
+		$delivery = json_encode(array('id' => 'phpbb:' . $post_id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane',
+			'kategorie' => array('samookaleczenie'), 'ocenzurowany' => null, 'wsparcie' => true, 'wersja' => '0000000000000000'));
+		$first = $this->deliver($delivery);
+		$this->wait_for_status($post_id, 'superseded');
+		$second = $this->deliver($delivery);
+		$this->set_config('minos_moderation_blocked', 'hold');
+
+		$this->assertSame(array(200, 200), array($first['status'], $second['status']));
+		$this->assertSame(ITEM_APPROVED, $this->visibility($post_id), 'the approval stands: not deleted under "delete"');
+		$this->assertStringContainsString('Testowy wpis o bardzo złym dniu', self::request('GET', 'viewtopic.php?p=' . $post_id)->filter('.postbody')->text(),
+			'a guest reads it');
+		$reports = $this->reports($post_id);
+		$this->assertCount(1, $reports, 'one report for two deliveries');
+		$this->assertSame(array(ANONYMOUS, 0), array((int) $reports[0]['user_id'], (int) $reports[0]['report_closed']));
+
+		$this->login();
+		$details = self::request('GET', 'mcp.php?i=reports&mode=report_details&r=' . (int) $reports[0]['report_id'] . '&sid=' . $this->sid)
+			->filter('#page-body')->text();
+		$this->logout();
+		$this->assertStringContainsString('Minos: potrzebne wsparcie — werdykt „zablokowane” nadszedł po decyzji moderatora', $details);
 	}
 
 	public function test_a_forged_or_stale_delivery_is_refused_and_traced_for_the_acp(): void

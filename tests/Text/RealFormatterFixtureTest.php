@@ -20,7 +20,8 @@ final class RealFormatterFixtureTest extends TestCase
 	private const CORPUS = array('bold-inside-a-word', 'quote-then-a-word', 'list', 'link-with-text', 'code', 'color', 'size', 'smilies',
 		'image', 'image-only', 'image-with-size', 'attachment-inline', 'flash', 'link-blank-label', 'link-empty-label', 'url-tag', 'bare-link-only',
 		'image-zwsp', 'image-shy', 'image-word-joiner', 'image-lrm', 'link-label-shy', 'link-label-zwsp', 'bold-zwsp', 'typed-entity',
-		'image-cgj', 'image-vs16', 'image-c1-control', 'image-hangul-filler', 'image-braille-blank', 'link-label-cgj', 'letter-combining-acute');
+		'image-cgj', 'image-vs16', 'image-c1-control', 'image-hangul-filler', 'image-braille-blank', 'link-label-cgj', 'letter-combining-acute',
+		'image-beside-a-link', 'linked-image', 'flash-beside-text');
 
 	/**
 	 * @return array<string,array{0:array<string,string>}>
@@ -117,6 +118,10 @@ final class RealFormatterFixtureTest extends TestCase
 			'an image and U+2800'  => array('image-braille-blank', ''),
 			'a link labelled U+034F' => array('link-label-cgj', ''),
 			'e and U+0301'         => array('letter-combining-acute', "e\u{0301}"),
+			// A medium's address is not text, also beside a link or inside one (F7, S1).
+			'an image beside a link' => array('image-beside-a-link', 'Zobacz stronę i'),
+			'a linked image'       => array('linked-image', 'Tekst'),
+			'a video beside text'  => array('flash-beside-text', 'Film  koniec'),
 			'the entity typed'     => array('typed-entity', '&#8203;'),
 			'plain lines'          => array('plain-lines', "Pierwsza linia\nDruga linia\n\nCzwarta & <znaki> \"cudzysłów\""),
 			'bold around a blank'  => array('blank-bold', ''),

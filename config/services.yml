@@ -61,6 +61,7 @@ services:
         arguments:
             - '@minos.moderation.settings'
             - '@minos.moderation.store'
+            - '@minos.moderation.applier'
 
     minos.moderation.deferred_verdicts:
         class: minos\moderation\event\deferred_verdicts

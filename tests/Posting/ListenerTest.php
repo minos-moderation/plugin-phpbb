@@ -274,6 +274,37 @@ final class ListenerTest extends TestCase
 		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
 	}
 
+	/**
+	 * @return array<string,array{0:string,1:string,2:int,3:string}>
+	 */
+	public function lonelyMarks(): array
+	{
+		// Marks with no base letter, as the whole text (F7: `\p{M}` is invisible on its own):
+		// U+034F, U+FE0F, a combining acute U+0301 and an enclosing circle U+20DD (`\p{Me}`).
+		$cases = array();
+		foreach (array('U+034F' => "\u{034F}", 'U+FE0F' => "\u{FE0F}", 'U+0301 and U+20DD' => "\u{0301}\u{20DD}", 'U+FE0F between spaces' => " \u{FE0F} ") as $name => $text)
+		{
+			$cases[$name . ', fail-closed'] = array($text, settings::FAIL_CLOSED, ITEM_UNAPPROVED, pending_store::HELD);
+			$cases[$name . ', fail-open'] = array($text, settings::FAIL_OPEN, ITEM_APPROVED, pending_store::PUBLISHED);
+		}
+		return $cases;
+	}
+
+	/**
+	 * @dataProvider lonelyMarks
+	 */
+	public function testAPostOfMarksWithoutABaseLetterGoesToTheFailureModeUnsent(string $text, string $mode, int $visibility, string $status): void
+	{
+		$this->board->configure(array(settings::FAIL_MODE => $mode));
+
+		$id = $this->board->posting('', 'reply', array('xml' => $this->board->xml($text), 'topic_id' => $this->topic()))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'nothing a reader reads: no request');
+		$row = $this->board->row($id);
+		self::assertSame(array($status, 'empty_text'), array($row['status'], $row['error_code']));
+		self::assertSame($visibility, (int) $this->board->post($id)['post_visibility']);
+	}
+
 	public function testALetterWithItsCombiningMarkIsTextAndIsSent(): void
 	{
 		// The control for the marks above: a mark beside its base letter is part of the text.
@@ -304,6 +335,46 @@ final class ListenerTest extends TestCase
 		self::assertSame('phpbb:' . $id, $item['id']);
 		self::assertSame('https://example.org/a', $item['tekst']);
 		self::assertSame(array(1, array('example.org')), array($item['meta']['links'], $item['meta']['link_domains']));
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:int,2:array<int,string>}>
+	 */
+	public function mediaAddresses(): array
+	{
+		// phpBB 3.3 links the address inside [img] and [flash] itself (an <URL> inside the
+		// element, tests/fixtures/phpbb-3.3/); the reader sees an image or a video, not a link.
+		return array(
+			'an image beside text'   => array('image', 0, array()),
+			'an image beside a link' => array('image-beside-a-link', 1, array('kasyno.example')),
+			'a linked image'         => array('linked-image', 1, array('kasyno.example')),
+			'a video beside text'    => array('flash-beside-text', 0, array()),
+		);
+	}
+
+	/**
+	 * @dataProvider mediaAddresses
+	 * @param array<int,string> $domains
+	 */
+	public function testAnImagesAddressIsNeitherCountedAsALinkNorItsDomainSent(string $body, int $links, array $domains): void
+	{
+		// The plugins' shared rules S2 and F7: an image's address is not a link. Before, the
+		// <URL> phpBB puts inside an image was counted, and its domain sent.
+		$this->board->posting('', 'reply', array('xml' => self::stored($body), 'topic_id' => $this->topic()));
+
+		self::assertCount(1, $this->gateway->requests, 'a text beside the medium: sent');
+		$meta = $this->gateway->items(0)[0]['meta'];
+		self::assertSame(array($links, $domains), array($meta['links'], $meta['link_domains']));
+	}
+
+	public function testAStoredTextThatIsNotPhpbbsXmlCountsEveryLink(): void
+	{
+		// phpBB 3.0's storage is not XML: nothing is left out of it (more signals, never fewer).
+		$this->board->posting('', 'reply', array('topic_id' => $this->topic(),
+			'xml' => 'Stary wpis & <URL url="https://kasyno.example/bonus">a</URL> <IMG src="x"><URL url="https://obrazki.example/a.png">b</URL></IMG>'));
+
+		$meta = $this->gateway->items(0)[0]['meta'];
+		self::assertSame(array(2, array('kasyno.example', 'obrazki.example')), array($meta['links'], $meta['link_domains']));
 	}
 
 	public function testAnImageBesideTextSendsTheTextWithoutTheImagesAddress(): void

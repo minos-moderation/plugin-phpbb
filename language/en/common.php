@@ -22,4 +22,5 @@ $lang = array_merge($lang, array(
 	'MINOS_DELETE_REASON' => 'Minos: treść zablokowana',
 	'MINOS_SUPPORT_REPORT' => 'Minos: potrzebne wsparcie — werdykt „%s”. Treść może świadczyć o samookaleczeniu lub kryzysie autora. Post pozostaje opublikowany: rozważ kontakt i wsparcie, decyzja należy do moderatora.',
 	'MINOS_SUPPORT_REPORT_LATE' => 'Minos: potrzebne wsparcie — werdykt „%s” po publikacji bez oceny. Treść może świadczyć o samookaleczeniu lub kryzysie autora. Post pozostaje opublikowany: rozważ kontakt i wsparcie, decyzja należy do moderatora.',
+	'MINOS_SUPPORT_REPORT_AFTER_DECISION' => 'Minos: potrzebne wsparcie — werdykt „%s” nadszedł po decyzji moderatora albo po edycji postu i dotyczy treści sprzed tej zmiany. Treść może świadczyć o samookaleczeniu lub kryzysie autora. Widoczność postu pozostaje bez zmian: rozważ kontakt i wsparcie.',
 ));

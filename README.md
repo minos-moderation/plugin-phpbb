@@ -169,7 +169,8 @@ tryb awarii:
   usuwa go miękko, zgodnie z ustawieniem), `ocenzurowane` maskuje go albo cofa do kolejki,
   `bezpieczne` potwierdza publikację. Post z `wsparcie` nigdy nie jest cofany ani usuwany:
   zostaje opublikowany, a moderatorzy dostają zgłoszenie (patrz „Wsparcie”). Jeśli jednak moderator w międzyczasie coś z postem
-  zrobił (usunął, przywrócił, zatwierdził), zostaje decyzja człowieka.
+  zrobił (usunął, przywrócił, zatwierdził), zostaje decyzja człowieka; sygnał `wsparcie` z
+  takiego werdyktu i tak trafia do moderatorów (patrz „Wsparcie”).
 
 Post zostawiony w kolejce przez tryb fail-closed również przyjmie spóźniony werdykt, o ile
 moderator nie zdążył go rozpatrzyć.
@@ -240,7 +241,9 @@ Do bramy trafia wyłącznie:
   awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
-  pierwszy post autora (dla gości — nie).
+  pierwszy post autora (dla gości — nie). Adres obrazka (`[img]`) ani filmu (`[flash]`) nie
+  jest linkiem: nie jest liczony ani wysyłany; obrazek, który sam jest linkiem
+  (`[url=…][img]…[/img][/url]`), liczy się jako link do adresu z `[url]`.
 
 **Nigdy** nie są wysyłane dane konta autora: jego adres e-mail, adres IP, identyfikator ani
 login. Jedyne imiona i nazwy, które opuszczają forum, to te, które autor sam wpisał w treść
@@ -312,6 +315,14 @@ postu.
   to nie pozwala, a moderatorzy i tak mają go w kolejce zgłoszeń. Gdy phpBB odrzuci zgłoszenie
   z innego powodu (np. dodatkowe sprawdzenie innego rozszerzenia), post zostaje opublikowany,
   a dziennik błędów w panelu administracyjnym dostaje wpis z numerem postu i kodem odmowy.
+- **Post, o którym zdecydował już człowiek** (moderator zatwierdził post, usunął go miękko
+  albo zmienił po publikacji w trybie fail-open, zanim nadszedł werdykt; albo post poprawiono
+  i werdykt dotyczy treści sprzed poprawki): rozszerzenie nie stosuje takiego werdyktu —
+  post zostaje taki, jak go zostawił człowiek — ale sygnał `wsparcie` dociera do moderatorów
+  tak samo: wpis w dzienniku moderatorów i zgłoszenie w „Zgłoszonych postach” z dopiskiem,
+  że werdykt nadszedł po decyzji moderatora albo po edycji postu. Powtórzone doręczenie tego
+  samego werdyktu nie tworzy drugiego zgłoszenia. Postu odrzuconego przez moderatora (phpBB
+  go wtedy usuwa) nie da się zgłosić: dziennik błędów dostaje wpis z jego numerem.
 
 ## Zadanie cron
 

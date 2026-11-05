@@ -19,7 +19,8 @@ use minos\moderation\platform\forum;
  * The gateway decides and the extension applies: `bezpieczne` publishes; `ocenzurowane`
  * and `zablokowane` follow their settings; anything that is not a verdict (`nieocenione`,
  * no answer in time, a refused request) follows the failure mode and is never read as one.
- * A post a moderator already dealt with is left alone.
+ * A post a moderator already dealt with is left alone; only its `wsparcie` still reaches the
+ * moderators (A7).
  *
  * A masked text is published only when it is the text sent with characters replaced by
  * `█`, the title sent with it is untouched, and the text sent is exactly what the author
@@ -218,6 +219,12 @@ class verdict_applier
 					// Still in the queue, now a moderator's alone: the e-mail held back for it.
 					$this->forum->notify_queue($post);
 				}
+				if ($status !== null && !empty($row['support']))
+				{
+					// A7: a person's decision is about the post's visibility, not about the signal.
+					// The rest of the verdict stays unapplied; `wsparcie` still reaches the moderators.
+					$this->signal_after_decision($post_id, $post, (string) $row['verdict']);
+				}
 				$this->db->sql_transaction('commit');
 				return $status;
 			}
@@ -360,6 +367,69 @@ class verdict_applier
 
 			$this->db->sql_transaction('commit');
 			return $status;
+		}
+		catch (\Throwable $e)
+		{
+			$this->db->sql_transaction('rollback');
+			throw $e;
+		}
+	}
+
+	/**
+	 * The signal of `wsparcie` that arrives after a person decided on the post, or after the
+	 * post changed under the extension (the plugins' shared rule A7: whatever the verdict): the
+	 * moderator log's `LOG_MINOS_SUPPORT` and a report in the MCP's "Reported posts", noted as
+	 * coming after the moderator's decision. The post's visibility is not touched. A post that
+	 * is gone (a moderator disapproved it, which deletes it) cannot be reported: the error log
+	 * names its id.
+	 *
+	 * Called once per verdict: {@see attempt} has just moved the row from `received` to
+	 * `superseded`, so a repeated delivery finds nothing to record; {@see signal_earlier_support}
+	 * has claimed the earlier revision's signal.
+	 *
+	 * @param int                      $post_id The post.
+	 * @param array<string,mixed>|null $post    A row from {@see forum::load_post}, or null.
+	 * @param string                   $verdict The recorded outcome, named in the report.
+	 * @return void
+	 */
+	protected function signal_after_decision($post_id, $post, $verdict)
+	{
+		if ($post === null)
+		{
+			$this->forum->log_support_post_gone($post_id);
+			return;
+		}
+		$this->forum->log_decision($post, 'LOG_MINOS_SUPPORT');
+		$this->forum->report_support($post, $verdict, false, true);
+	}
+
+	/**
+	 * The `wsparcie` of a verdict for an earlier revision of a post (it was edited since, by
+	 * its author or a moderator, and the new text is assessed on its own): the verdict is not
+	 * applied, the signal is raised once, as {@see signal_after_decision} raises it. A verdict
+	 * for the row's own revision is not this one's (the row handles it, or handled it).
+	 *
+	 * The claim and the signal share one transaction: if the report fails, both roll back and
+	 * the exception reaches the webhook, whose error answer makes the gateway deliver again.
+	 *
+	 * @param int    $post_id  The post.
+	 * @param int    $revision The revision the verdict is about.
+	 * @param string $verdict  The gateway's outcome, named in the report.
+	 * @return bool Whether the signal was raised now.
+	 */
+	public function signal_earlier_support($post_id, $revision, $verdict)
+	{
+		$this->db->sql_transaction('begin');
+		try
+		{
+			if (!$this->store->claim_earlier_support($post_id, $revision))
+			{
+				$this->db->sql_transaction('commit');
+				return false;
+			}
+			$this->signal_after_decision($post_id, $this->forum->load_post($post_id), $verdict);
+			$this->db->sql_transaction('commit');
+			return true;
 		}
 		catch (\Throwable $e)
 		{

@@ -455,6 +455,27 @@ class pending_store
 	}
 
 	/**
+	 * Claims the signal of `wsparcie` that a verdict for an earlier revision carries (the post
+	 * was edited since, so the verdict itself is not applied): true once per post and revision,
+	 * and only for a revision older than the row's. A later claim for the same or an older
+	 * revision finds `support_signalled` there already.
+	 *
+	 * @param int $post_id  The post.
+	 * @param int $revision The revision the verdict is about.
+	 * @return bool
+	 */
+	public function claim_earlier_support($post_id, $revision)
+	{
+		$sql = 'UPDATE ' . $this->table . '
+			SET support_signalled = ' . ((int) $revision + 1) . '
+			WHERE post_id = ' . (int) $post_id . '
+				AND revision > ' . (int) $revision . '
+				AND support_signalled < ' . ((int) $revision + 1);
+		$this->db->sql_query($sql);
+		return $this->db->sql_affectedrows() === 1;
+	}
+
+	/**
 	 * Closes a row whose post no longer waits (approved by a moderator, deleted, gone).
 	 *
 	 * @param int $post_id  The post.
