@@ -248,7 +248,12 @@ decision).
   guest: phpBB names the request's user, which is the guest in the webhook's request; in
   another request (the cron task in a member's page view, the CLI) the user's data is the
   guest's for the call and restored after it, with the permissions phpBB reloads for the
-  report. phpBB checks the reporter's `f_list`, `f_read` and `f_report` (a guest has no
+  report. In phpBB's CLI (`bin/phpbbcli.php cron:run`) the user's data has no
+  `user_permissions` (phpBB sets only `user_id`), so there is nothing to reload: after a
+  report, `$auth` holds the guest's permissions (loaded by `add_report()`) until the end of
+  the run, where it held none before. Harmless today: the extension asks `$auth` nothing in
+  a cron run; another task later in the same run would see a guest's rights, what any
+  visitor has. phpBB checks the reporter's `f_list`, `f_read` and `f_report` (a guest has no
   `f_report` by default): the listener on `core.report_post_auth` clears that check for the
   extension's own report only (`forum::reporting()`). A post with an open report (phpBB
   refuses a second: `already_reported_exception`) is not reported again, and a repeated
@@ -327,12 +332,15 @@ decision).
 
 The rules every Minos plugin shares are client-php's `docs/plugin-behaviour.md`; the
 entries above say how this extension carries them out. This table names, for the rules
-whose form differs between the plugins, this extension's mechanism, an accepted deviation,
-or an optional rule left out.
+whose form differs between the plugins, this extension's mechanism, a deviation, or an
+optional rule left out.
 
-| Rule | In this extension |
-|---|---|
-| A7 `wsparcie` | An active signal in the MCP: a held post stays in the approval queue, marked "potrzebne wsparcie", with the queue e-mail; a published post gets a report in "Reported posts" (by the guest, reason "other"), also after a person's decision and for the text before an edit, with a note saying so; `LOG_MINOS_SUPPORT` beside each. Never deleted, rejected or hidden automatically. |
+| Id | In short | phpBB: mechanism, or deviation |
+|---|---|---|
+| `F5d` | optional: re-send what fail-open published unassessed once the limit renews | not implemented: the rule is optional and off by default (nie wdrożono, reguła opcjonalna); not a deviation |
+| `F7`, `S2` | an image's address is not text and not a link | `forum::MEDIA_ELEMENTS` add no text (`plain_text`) and no link (`links_of`): the `<URL>` phpBB puts inside `IMG` and `FLASH` is neither counted in `meta.links` nor listed in `meta.link_domains`; `ListenerTest` "an image's address is neither counted as a link nor its domain sent" |
+| `S1` | an image's `alt`/`title` is sent next to the word it belongs to | deviation: the `title`/`alt` attributes are added at the end of the text, each on a line of its own (`forum::plain_text`), not beside their word. Only a board's own BBCode carries them: phpBB 3.3's default `[img]`, `[url]` and `[flash]` have none. Never alone (F7); nothing a reader does not see is added |
+| `A7` | `wsparcie`: an active signal in the moderators' queue, whatever the verdict | An active signal in the MCP: a held post stays in the approval queue, marked "potrzebne wsparcie", with the queue e-mail; a published post gets a report in "Reported posts" (by the guest, reason "other"), also after a person's decision and for the text before an edit, with a note saying so; `LOG_MINOS_SUPPORT` beside each. Never deleted, rejected or hidden automatically; `SupportAfterDecisionTest`, `WebhookTest`, `LateVerdictTest` |
 
 ```bash
 composer install
