@@ -84,7 +84,10 @@ decision).
   the WordPress and MyBB plugins, review C-3). Held posts wait for moderators.
   Switched on again in the ACP, every row still waiting (`queued`, `pending`) becomes a new
   revision, queued with a fresh time-out (`pending_store::restart_waiting`; the plugins'
-  shared rule D9.13). Re-enabled in the extension manager with the setting left on, the cron
+  shared rule D9.13). The old revision's verdict, which the gateway may still deliver, is
+  not applied, and its `wsparcie` files no report "after a decision": nobody decided, the
+  same text goes again and brings its own (the restart marks the old revision's signal as
+  claimed, `support_signalled`; `AcpControllerTest`). Re-enabled in the extension manager with the setting left on, the cron
   task resumes where it stopped (overdue rows get the failure mode).
 - **A disabled board still takes the gateway's deliveries** (review of #7, C-45). phpBB
   answers a guest on a disabled board (`board_disable`) or over its load limit (`limit_load`)

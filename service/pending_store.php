@@ -526,8 +526,16 @@ class pending_store
 	 * Starts the assessment again for every row still waiting for a verdict (`queued`,
 	 * `pending`), when the extension is switched on again: while it was off nothing was sent,
 	 * and the webhook refused the gateway's deliveries. Each row becomes a new revision,
-	 * queued now, with a fresh time-out (the plugins' shared rule D9.13). A recorded verdict
+	 * queued now, with a fresh time-out (the plugins' shared rule F9). A recorded verdict
 	 * (`received`) is left to be applied.
+	 *
+	 * The revision before the restart is no earlier text a person replaced: the same text is
+	 * sent again, and its new verdict carries its own `wsparcie`. So that the gateway's late
+	 * delivery of the old revision's verdict, which the webhook refused while switched off,
+	 * files no report saying it came "after a moderator's decision or an edit", the old
+	 * revision's signal counts as claimed ({@see claim_earlier_support}). The column is
+	 * assigned before `revision`, so it takes the old revision + 1 on every database (MySQL
+	 * assigns left to right with the new values, the others with the old ones).
 	 *
 	 * @param int $now Unix seconds.
 	 * @return int Rows restarted.
@@ -535,7 +543,7 @@ class pending_store
 	public function restart_waiting($now)
 	{
 		$this->db->sql_query('UPDATE ' . $this->table . '
-			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+			SET support_signalled = revision + 1, revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
 				'status'       => self::QUEUED,
 				'verdict'      => '',
 				'categories'   => '',
