@@ -365,9 +365,10 @@ Wyjątek: w czasie **aktualizacji phpBB** (katalog `install/` na serwerze) phpBB
 każde żądanie, także na doręczenie werdyktu, stroną „forum wyłączone” z kodem `200`, zanim
 rozszerzenie je zobaczy. Brama uznaje wtedy werdykt za doręczony i go nie ponawia: werdykt
 przepada, a post czeka do końca czasu oczekiwania i obsługuje go tryb awarii (fail-closed:
-zostaje w kolejce dla moderatora). Na czas aktualizacji phpBB wyłącz ocenianie w ustawieniach
-rozszerzenia: webhook odpowiada wtedy `404`, brama ponawia doręczenie, a po ponownym włączeniu
-oceniania czekające posty są oceniane od nowa.
+zostaje w kolejce dla moderatora). Wyłączenie oceniania tego nie zmienia: w czasie aktualizacji
+forum odpowiada bramie samo, także przy wyłączonym ocenianiu, więc werdykty doręczone wtedy
+przepadają. Mimo to na czas aktualizacji phpBB wyłącz ocenianie w ustawieniach rozszerzenia:
+po ponownym włączeniu oceniania czekające posty są wysyłane do bramy od nowa.
 
 ## Usunięcie rozszerzenia
 

@@ -189,6 +189,36 @@ final class WebhookTest extends TestCase
 		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility']);
 	}
 
+	/**
+	 * Shared rule F10: a verdict the database refuses to record is never answered with a
+	 * `2xx`, which the gateway would count as delivered. The driver's error reaches the
+	 * webhook (on a board, phpBB's database layer turns it into `E_USER_ERROR`, which
+	 * `msg_handler` answers with `503`), and the gateway's next delivery is recorded.
+	 */
+	public function testAVerdictTheDatabaseRefusesToRecordIsNeverAnswered2xx(): void
+	{
+		$id = $this->pending();
+		$this->board->db->pdo->exec('CREATE TRIGGER minos_test_record BEFORE UPDATE OF status ON ' . Board::PREFIX
+			. "minos_pending WHEN NEW.status = '" . pending_store::RECEIVED . "' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+
+		$status = null;
+		try
+		{
+			$status = $this->board->deliver(self::verdict($id, 'bezpieczne'));
+		}
+		catch (\PDOException $e)
+		{
+			self::assertStringContainsString('disk full', $e->getMessage(), 'the refusal of the record, not another error');
+		}
+		self::assertNull($status, 'no answer the gateway reads as delivered');
+		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'nothing recorded');
+		self::assertSame(array(), $this->board->visibility->calls, 'nothing applied');
+
+		$this->board->db->pdo->exec('DROP TRIGGER minos_test_record');
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne')));
+		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status'], 'the next delivery is recorded and applied');
+	}
+
 	public function testAVerdictThatOvertakesTheGatewaysAcceptanceStillChecksTheTextSent(): void
 	{
 		// Audit probe 3 A, the other way round: the webhook arrives before the extension handles
