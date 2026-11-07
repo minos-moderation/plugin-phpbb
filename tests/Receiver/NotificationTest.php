@@ -174,7 +174,7 @@ final class NotificationTest extends TestCase
 
 	public function testAReplyWithoutTextToAssessIsAnnouncedAsAPostInTheQueue(): void
 	{
-		// Shared rule D9.5: a reply of only a link with a blank text is held and gets the
+		// Shared rule F7: a reply of only a link with a blank text is held and gets the
 		// failure mode at once, without a request.
 		$topic = $this->board->write_post($this->board->xml('Pierwszy wpis tematu.'), ITEM_APPROVED);
 		$this->board->db->sql_query('UPDATE phpbb_topics SET topic_posts_approved = 1');

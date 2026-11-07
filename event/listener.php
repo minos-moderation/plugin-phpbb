@@ -32,9 +32,9 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * replies with neither text to assess, a link nor a subject of their own (attachments only);
  * and everything while the extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
  * address), it holds new posts and gives them the failure mode at once (the plugins' shared
- * rule D9.12). A post with a link or a title (a new topic, a reply's own subject) but no text
+ * rule F8). A post with a link or a title (a new topic, a reply's own subject) but no text
  * to assess is held and goes to the failure mode at once, without a request (the plugins'
- * shared rule D9.5): a link, even one with a blank text, and a title never pass unassessed,
+ * shared rule F7): a link, even one with a blank text, and a title never pass unassessed,
  * and a title is never sent alone. Switched off, the
  * extension does nothing at all: an edit of a post it held is not sent either, and the post
  * waits for a moderator.
@@ -330,7 +330,7 @@ class listener implements EventSubscriberInterface
 	 * Whether a new post is to be held and assessed: every post the settings cover, whatever
 	 * it holds. One without text to assess - blank, only images, attachments or videos, only
 	 * a link with a blank label, a title alone - is held too, and gets the failure mode at once
-	 * without a request (the plugins' shared rules D9.5 and F7): what a reader sees of it is
+	 * without a request (the plugins' shared rule F7): what a reader sees of it is
 	 * nothing the gateway assesses, so the failure mode decides it instead.
 	 *
 	 * @param array<string,mixed> $data     phpBB's post data going to be stored.

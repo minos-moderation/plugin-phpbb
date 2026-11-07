@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The notice on every ACP page while the extension is switched on but cannot submit posts
- * (the plugins' shared rule D9.12).
+ * (the plugins' shared rule F8).
  */
 final class AcpNoticeTest extends TestCase
 {

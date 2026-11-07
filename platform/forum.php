@@ -403,7 +403,7 @@ class forum
 
 	/**
 	 * The poll a post carries, as a reader sees it: its question, then each option on a line of
-	 * its own (the plugins' shared rule D9.1: a poll's question and options are part of the text
+	 * its own (the plugins' shared rule S5: a poll's question and options are part of the text
 	 * of the post that carries the poll). In phpBB the poll belongs to the topic and is edited
 	 * with its first post, which carries it; the question and the options are stored as parsed
 	 * text, as a post is.

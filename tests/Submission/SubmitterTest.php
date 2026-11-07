@@ -294,7 +294,7 @@ final class SubmitterTest extends TestCase
 	 */
 	public function testOnlyA202AcceptsAnyOther2xxIsRetriedWithAPause(int $status, ?string $body): void
 	{
-		// The plugins' shared rule D9.6 (F5a): never a configuration error, never an acceptance.
+		// The plugins' shared rule F5a: never a configuration error, never an acceptance.
 		$this->gateway->script[] = function (array $ids) use ($status, $body) {
 			return array('status' => $status, 'body' => ($body !== null) ? $body : json_encode(array('przyjete' => $ids)));
 		};
@@ -321,7 +321,7 @@ final class SubmitterTest extends TestCase
 
 	public function testA408IsANetworkFailureRetriedWithAPause(): void
 	{
-		// The plugins' shared rule D9.6 (F5a): 408 counts as no answer, not as a configuration error.
+		// The plugins' shared rule F5a: 408 counts as no answer, not as a configuration error.
 		$this->gateway->script[] = array('status' => 408, 'body' => '<html>Request Timeout</html>');
 		$now = time();
 
@@ -690,7 +690,7 @@ final class SubmitterTest extends TestCase
 
 	public function testATopicsPollIsSentWithItsQuestionAndOptions(): void
 	{
-		// Shared rule D9.1: a poll's question and options are part of the text of the post
+		// Shared rule S5: a poll's question and options are part of the text of the post
 		// that carries the poll; a word in an option must not pass unassessed.
 		$this->board->posting('Treść pierwszego postu.', 'post', array('title' => 'Temat z ankietą',
 			'poll' => array('question' => 'Co wybierasz?', 'options' => array('Opcja pierwsza', 'Obraźliwa opcja druga'))));

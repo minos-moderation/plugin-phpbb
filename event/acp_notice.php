@@ -15,7 +15,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
  * Says on every ACP page why the extension cannot submit posts while it is switched on
- * without a usable configuration (the plugins' shared rule D9.12): every new post gets the
+ * without a usable configuration (the plugins' shared rule F8): every new post gets the
  * failure mode until then. Only what is missing is named, never a stored value.
  */
 class acp_notice implements EventSubscriberInterface

@@ -180,7 +180,7 @@ final class MockGatewayTest extends TestCase
 
 	public function testOnlyTheMocksAcceptanceAcceptsAPostOverHttp(): void
 	{
-		// The plugins' shared rule D9.6 (F5a), over HTTP with the real cURL transport: a 200
+		// The plugins' shared rule F5a, over HTTP with the real cURL transport: a 200
 		// naming the post in `przyjete` and then a 408 at the gateway's address are retried
 		// (and pause the sending), never taken as an acceptance or a configuration error; once
 		// the address is the mock's, its 202 accepts the post and its verdict is applied.

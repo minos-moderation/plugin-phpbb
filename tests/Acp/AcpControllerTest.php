@@ -358,7 +358,7 @@ final class AcpControllerTest extends TestCase
 
 	public function testSwitchingOnAgainSendsWhatWaitedWithAFreshTimeout(): void
 	{
-		// Shared rule D9.13: a post that waited while the extension was off used to get the
+		// Shared rule F9: a post that waited while the extension was off used to get the
 		// failure mode in the first run after it was switched on again.
 		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
 		$this->submit($this->form(array('minos_enabled' => '0')));

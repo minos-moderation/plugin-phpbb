@@ -382,7 +382,7 @@ class moderation_test extends \phpbb_functional_test_case
 		$this->assertSame('pending', $this->row($post_id)['status']);
 
 		// Switched on again: what waited is queued again as a new revision (the plugins' shared
-		// rule D9.13), for the cron task.
+		// rule F9), for the cron task.
 		$this->configure();
 		$this->assertSame(array('queued', '1'), array($this->row($post_id)['status'], (string) $this->row($post_id)['revision']));
 

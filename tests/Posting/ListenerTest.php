@@ -109,7 +109,7 @@ final class ListenerTest extends TestCase
 	 */
 	public function testSwitchedOnWithoutAUsableConfigurationANewPostGetsTheFailureModeAtOnce(callable $arrange): void
 	{
-		// Shared rule D9.12: such a post used to be published as if the extension were off.
+		// Shared rule F8: such a post used to be published as if the extension were off.
 		$arrange($this->board);
 
 		$posted = $this->board->posting('Zwykły testowy wpis.');
