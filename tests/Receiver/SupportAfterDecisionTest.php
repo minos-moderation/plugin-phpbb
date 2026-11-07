@@ -5,6 +5,7 @@ namespace minos\moderation\tests\Receiver;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\tests\Fake\Board;
+use Minos\Client\Signature;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -243,6 +244,77 @@ final class SupportAfterDecisionTest extends TestCase
 
 		self::assertSame(200, $this->board->deliver($payload));
 		self::assertCount(1, $this->board->reports->of($id), 'filed on the gateway\'s next delivery');
+	}
+
+	public function testAnEditThatOvertakesARecordedVerdictStillRaisesItsSupport(): void
+	{
+		// Before: the verdict was recorded (`received`), the edit came before it was applied,
+		// and the restart zeroed `support` with the verdict: the signal was lost for good,
+		// since the gateway had its 200 and never delivers again.
+		$this->board->configure(array(settings::BLOCKED => settings::BLOCKED_DELETE));
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->record($this->verdict($id, 'zablokowane', true));
+		self::assertSame(array(pending_store::RECEIVED, '1'), array($this->board->row($id)['status'], (string) $this->board->row($id)['support']));
+		$calls = count($this->board->visibility->calls);
+
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+
+		$row = $this->board->row($id);
+		self::assertSame(array('1', pending_store::PENDING), array((string) $row['revision'], $row['status']), 'the new text is sent');
+		self::assertSame('phpbb:' . $id . '.1', $this->board->transport->items(1)[0]['id']);
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'), 'the moderator log');
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports, 'the active signal');
+		self::assertStringContainsString('po edycji postu', $reports[0]['report_text']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the old verdict is not applied');
+		self::assertSame(array(), array_slice($this->board->visibility->calls, $calls), 'neither deleted nor published');
+
+		// What the webhook would have applied after its answer, and a repeated delivery.
+		$this->board->dispatcher->terminate();
+		$this->board->sweeper()->sweep(time());
+		self::assertSame(200, $this->board->deliver($this->verdict($id, 'zablokowane', true)));
+		self::assertCount(1, $this->board->reports->of($id), 'once');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testAnEditThatOvertakesARecordedVerdictWithoutSupportSignalsNothing(): void
+	{
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->record($this->verdict($id, 'zablokowane', false));
+
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+
+		self::assertSame(array('1', pending_store::PENDING), array((string) $this->board->row($id)['revision'], $this->board->row($id)['status']));
+		self::assertSame(array(), $this->board->reports->of($id));
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_SUPPORT'));
+	}
+
+	public function testASignalTheEditCannotFileIsLoggedAndTheEditIsStillSent(): void
+	{
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->record($this->verdict($id, 'zablokowane', true));
+		$this->board->reports->fail_with = new \RuntimeException('a database error');
+
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+
+		self::assertSame(array('1', pending_store::PENDING), array((string) $this->board->row($id)['revision'], $this->board->row($id)['status']),
+			'the author\'s edit is not broken by the report');
+		$lost = $this->board->log->of('LOG_MINOS_SUPPORT_LOST');
+		self::assertCount(1, $lost, 'the error log says so');
+		self::assertSame(array('critical', array($id)), array($lost[0]['mode'], $lost[0]['data']), 'the post\'s id, nothing else');
+	}
+
+	/**
+	 * A delivery recorded and answered, before `app.php` applies it after the answer.
+	 *
+	 * @param array<string,mixed> $payload
+	 */
+	private function record(array $payload): void
+	{
+		$body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		$answer = $this->board->receiver->receive($body, Signature::sign(Board::SECRET, $body, time()), time());
+		self::assertSame(array(200, (int) substr((string) $payload['id'], strlen('phpbb:'))), $answer, 'recorded, to be applied after the answer');
 	}
 
 	/**

@@ -950,6 +950,20 @@ class forum
 	}
 
 	/**
+	 * Writes into the error log that the `wsparcie` of a recorded verdict an edit overtook could
+	 * not be raised (the report and its moderator log entry rolled back together): the gateway
+	 * delivered that verdict already and will not again, so only this entry is left. The post's
+	 * id only.
+	 *
+	 * @param int $post_id The post.
+	 * @return void
+	 */
+	public function log_support_lost($post_id)
+	{
+		$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_LOST', false, array((int) $post_id));
+	}
+
+	/**
 	 * The post the extension is reporting right now ({@see report_support}), for the listener
 	 * of `core.report_post_auth`.
 	 *

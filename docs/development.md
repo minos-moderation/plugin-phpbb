@@ -280,6 +280,14 @@ decision).
   (`pending_store::claim_earlier_support`, the `support_signalled` column of migration
   `support_signal`: that revision + 1) in one transaction with the report, before the
   webhook's answer, so a failure rolls both back and the gateway's next delivery tries again.
+  An edit that overtakes a verdict already recorded but not yet applied (the row
+  `received`: the webhook applies after its answer, the cron task after a stop) drops that
+  verdict as well, and its `wsparcie` is raised at once, in the editing request, as for a
+  verdict that arrives after the edit (`pending_store::restart` names the old revision and
+  verdict, restarting such a row only by an update that names both; `listener` raises it
+  through `verdict_applier::signal_earlier_support`). The gateway does not deliver that
+  verdict again, so a failure there is never thrown into the author's posting: the claim and
+  the report roll back and the error log gets `LOG_MINOS_SUPPORT_LOST` with the post's id.
   A post that is gone (phpBB's "disapprove" deletes a queued post) cannot be reported: the
   error log gets `LOG_MINOS_SUPPORT_POST_GONE` with its id.
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an

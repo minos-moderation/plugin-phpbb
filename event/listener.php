@@ -14,6 +14,7 @@ use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\service\submitter;
+use minos\moderation\service\verdict_applier;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -79,6 +80,9 @@ class listener implements EventSubscriberInterface
 	/** @var \phpbb\user */
 	protected $user;
 
+	/** @var verdict_applier */
+	protected $applier;
+
 	/**
 	 * @param settings                 $settings  The administrator's settings.
 	 * @param pending_store            $store     The pending rows.
@@ -87,9 +91,11 @@ class listener implements EventSubscriberInterface
 	 * @param \phpbb\auth\auth         $auth      The poster's permissions.
 	 * @param \phpbb\language\language $language  The MCP labels.
 	 * @param \phpbb\user              $user      The poster (a new post is always the current user's).
+	 * @param verdict_applier          $applier   For the `wsparcie` of a recorded verdict an edit
+	 *     overtook.
 	 */
 	public function __construct(settings $settings, pending_store $store, forum $forum, submitter $submitter,
-		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user)
+		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user, verdict_applier $applier)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
@@ -98,6 +104,7 @@ class listener implements EventSubscriberInterface
 		$this->auth = $auth;
 		$this->language = $language;
 		$this->user = $user;
+		$this->applier = $applier;
 	}
 
 	/**
@@ -193,7 +200,24 @@ class listener implements EventSubscriberInterface
 		}
 
 		$now = time();
-		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now) : $this->store->create($post_id, $now);
+		$owed = null;
+		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now, $owed) : $this->store->create($post_id, $now);
+		if ($owed !== null)
+		{
+			// The edit overtook a verdict recorded but not yet applied (the webhook applies it
+			// after its answer, or the cron task): the verdict is for the old text and is
+			// dropped, but its `wsparcie` is owed (A7), as for a verdict that arrives after the
+			// edit. The gateway will not deliver it again, so a failure is logged, never thrown
+			// into the author's posting.
+			try
+			{
+				$this->applier->signal_earlier_support($post_id, $owed[0], $owed[1]);
+			}
+			catch (\Throwable $e)
+			{
+				$this->forum->log_support_lost($post_id);
+			}
+		}
 		if (!$queued)
 		{
 			// Nothing to assess it with: the moderators get phpBB's e-mail, held back for it

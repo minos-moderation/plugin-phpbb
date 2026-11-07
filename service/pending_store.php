@@ -494,32 +494,64 @@ class pending_store
 	 * time-out left it unassessed (held by fail-closed, published by fail-open): a new
 	 * revision, queued now, with the previous outcome and marks forgotten.
 	 *
-	 * @param int $post_id The post.
-	 * @param int $now     Unix seconds.
+	 * A row whose gateway verdict is recorded (`received`) but not yet applied carries the
+	 * verdict's `wsparcie`, which the restart forgets with the verdict: the signal is then
+	 * owed for the old revision (A7), and `$owed` names it - the revision and the verdict -
+	 * for the caller to raise ({@see verdict_applier::signal_earlier_support}). That row is
+	 * restarted only by an update that names its revision and verdict, so a verdict recorded
+	 * between the read and the update is never forgotten unseen: the other update leaves such
+	 * a row alone and the read is tried once more.
+	 *
+	 * @param int                     $post_id The post.
+	 * @param int                     $now     Unix seconds.
+	 * @param array{0:int,1:string}|null $owed Set to the old revision and its verdict when
+	 *     the restart forgot a recorded `wsparcie`, else null.
 	 * @return bool False when the row is neither waiting nor timed out.
 	 */
-	public function restart($post_id, $now)
+	public function restart($post_id, $now, &$owed = null)
 	{
-		$sql = 'UPDATE ' . $this->table . '
-			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
-				'status'       => self::QUEUED,
-				'verdict'      => '',
-				'categories'   => '',
-				'support'      => 0,
-				'attempts'     => 0,
-				'submitted_at' => (int) $now,
-				'retry_at'     => (int) $now,
-				'error_code'   => '',
-				'masked_text'  => '',
-				'sent_md5'     => '',
-				'approved_at'  => 0,
-				'approved_md5' => '',
-				'received_at'  => 0,
-			)) . '
-			WHERE post_id = ' . (int) $post_id . '
-				AND ' . $this->reopenable();
-		$this->db->sql_query($sql);
-		return $this->db->sql_affectedrows() === 1;
+		$owed = null;
+		for ($attempt = 0; $attempt < 2; $attempt++)
+		{
+			$row = $this->find($post_id);
+			if ($row === null)
+			{
+				return false;
+			}
+			$support = ((string) $row['status'] === self::RECEIVED && (int) $row['support'] === 1);
+			$which = $support
+				? "status = '" . self::RECEIVED . "' AND support = 1 AND revision = " . (int) $row['revision'] . "
+					AND verdict = '" . $this->db->sql_escape((string) $row['verdict']) . "'"
+				: $this->reopenable() . " AND NOT (status = '" . self::RECEIVED . "' AND support = 1)";
+			$sql = 'UPDATE ' . $this->table . '
+				SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+					'status'       => self::QUEUED,
+					'verdict'      => '',
+					'categories'   => '',
+					'support'      => 0,
+					'attempts'     => 0,
+					'submitted_at' => (int) $now,
+					'retry_at'     => (int) $now,
+					'error_code'   => '',
+					'masked_text'  => '',
+					'sent_md5'     => '',
+					'approved_at'  => 0,
+					'approved_md5' => '',
+					'received_at'  => 0,
+				)) . '
+				WHERE post_id = ' . (int) $post_id . '
+					AND ' . $which;
+			$this->db->sql_query($sql);
+			if ($this->db->sql_affectedrows() === 1)
+			{
+				if ($support)
+				{
+					$owed = array((int) $row['revision'], (string) $row['verdict']);
+				}
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
