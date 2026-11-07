@@ -568,9 +568,14 @@ class pending_store
 	 * sent again, and its new verdict carries its own `wsparcie`. So that the gateway's late
 	 * delivery of the old revision's verdict, which the webhook refused while switched off,
 	 * files no report saying it came "after a moderator's decision or an edit", the old
-	 * revision's signal counts as claimed ({@see claim_earlier_support}). The column is
-	 * assigned before `revision`, so it takes the old revision + 1 on every database (MySQL
-	 * assigns left to right with the new values, the others with the old ones).
+	 * revision's signal counts as claimed ({@see claim_earlier_support}) - but only when every
+	 * revision before it is claimed already (`support_signalled` = `revision`, as on a post
+	 * never edited). Otherwise the claim stays where it is: an earlier revision an edit
+	 * replaced may still bring its signal, and the claim only moves forward, so moving it past
+	 * that revision would lose a real signal to save a redundant one. The column is assigned
+	 * before `revision`, so its `CASE` reads the old revision on every database phpBB supports
+	 * (MySQL assigns left to right with the values already assigned; PostgreSQL, SQLite,
+	 * MSSQL and Oracle read the old row throughout).
 	 *
 	 * @param int $now Unix seconds.
 	 * @return int Rows restarted.
@@ -578,7 +583,8 @@ class pending_store
 	public function restart_waiting($now)
 	{
 		$this->db->sql_query('UPDATE ' . $this->table . '
-			SET support_signalled = revision + 1, revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+			SET support_signalled = CASE WHEN support_signalled = revision THEN revision + 1 ELSE support_signalled END,
+				revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
 				'status'       => self::QUEUED,
 				'verdict'      => '',
 				'categories'   => '',

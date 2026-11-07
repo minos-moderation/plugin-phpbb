@@ -87,7 +87,10 @@ decision).
   shared rule F9). The old revision's verdict, which the gateway may still deliver, is
   not applied, and its `wsparcie` files no report "after a decision": nobody decided, the
   same text goes again and brings its own (the restart marks the old revision's signal as
-  claimed, `support_signalled`; `AcpControllerTest`). Re-enabled in the extension manager with the setting left on, the cron
+  claimed, `support_signalled`, when every revision before it is claimed already; after an
+  edit whose earlier revision has not signalled yet, the claim stays, because it only moves
+  forward and that revision's signal is real: a redundant report rather than a lost one;
+  `AcpControllerTest`). Re-enabled in the extension manager with the setting left on, the cron
   task resumes where it stopped (overdue rows get the failure mode).
 - **A disabled board still takes the gateway's deliveries** (review of #7, C-45). phpBB
   answers a guest on a disabled board (`board_disable`) or over its load limit (`limit_load`)

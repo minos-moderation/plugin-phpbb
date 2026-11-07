@@ -409,6 +409,28 @@ final class AcpControllerTest extends TestCase
 		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
 	}
 
+	public function testAnEditedPostsEarlierRevisionStillReportsItsSupportAfterSwitchingOnAgain(): void
+	{
+		// Review of #12: switching on again marked every revision up to the restarted one as
+		// signalled, so the text an edit had replaced lost its signal for good.
+		$id = $this->board->posting('Testowy wpis o bardzo złym dniu.')['post_id'];
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+		$this->submit($this->form(array('minos_enabled' => '0')));
+		$this->submit($this->form(array('minos_enabled' => '1')));
+		self::assertSame('2', (string) $this->board->row($id)['revision']);
+
+		self::assertSame(200, $this->board->deliver(array(
+			'id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane',
+			'kategorie' => array('samookaleczenie'), 'wsparcie' => true, 'wersja' => '3f0c9a41d2b7e8c5',
+		)));
+
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports, 'the text the edit replaced is reported, once');
+		self::assertStringContainsString('po edycji postu', $reports[0]['report_text']);
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the old verdict is not applied');
+	}
+
 	public function testSavingWhileSwitchedOnRestartsNothing(): void
 	{
 		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
