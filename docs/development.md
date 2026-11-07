@@ -362,9 +362,9 @@ decision).
 The rules every Minos plugin shares are client-php's `docs/plugin-behaviour.md`; the
 entries above say how this extension carries them out. This table maps every identifier (D1)
 to the code and the tests that implement it, to an `odstępstwo` with the issue that closes
-it, or to an optional rule left out. It follows the rules as client-php's `main` states
-them, F10 and the 2026-11-05 wording (F7, S1, S2, S3, A7, D1) included, which its next tag
-carries; the lock is at `v0.2.0`.
+it, or to an optional rule left out. It follows the rules as client-php's tag `v0.2.1`
+states them, F10 and the 2026-11-05 wording (F7, S1, S2, S3, A7, D1) included; the lock is
+at that tag.
 
 | Id | In short | phpBB: mechanism, or deviation |
 |---|---|---|
@@ -402,9 +402,9 @@ carries; the lock is at `v0.2.0`.
 | `A6` | a late verdict also applies to a post the failure mode held | `pending_store::record_verdict` (a `held` row whose verdict is `timeout`), applied as in time; `LateVerdictTest::testALateVerdictForAPostHeldByTheFailClosedModeIsApplied`, `testALateVerdictForAHeldPostAModeratorApprovedIsIgnored` |
 | `A7` | `wsparcie`: an active signal in the moderators' queue, whatever the verdict | An active signal in the MCP: a held post stays in the approval queue, marked "potrzebne wsparcie", with the queue e-mail; a published post gets a report in "Reported posts" (by the guest, reason "other"), also after a person's decision and for the text before an edit, with a note saying so; `LOG_MINOS_SUPPORT` beside each. Never deleted, rejected or hidden automatically; `SupportAfterDecisionTest`, `WebhookTest`, `LateVerdictTest` |
 | `A8` | the plugin's own data (the original, the verdicts) is kept 30 days; the platform's records follow the forum's rules | `sweeper::RETENTION_S`, `pending_store::prune`, also while switched off; the moderator log and phpBB's reports stay under the forum's rules (README, "Zadanie cron"); `SweeperTest::testFinishedRowsAreForgottenAfterThirtyDaysAndWaitingOnesAreNot`, `testSwitchedOffFinishedRowsAreStillForgottenAfterThirtyDays` |
-| `P1` | the archive carries no lock file, tests or mock, and pins the client | `bin/package.php`, `.github/scripts/check-release-archive.sh`; the lock at the tag `v0.2.0`; `PackageTest::testNoLockNoDependencyManifestNoTestsNoMock`, `testThePackageVerifiesTheGatewaysSignatureWithoutComposer` |
+| `P1` | the archive carries no lock file, tests or mock, and pins the client | `bin/package.php`, `.github/scripts/check-release-archive.sh`; the lock at the tag `v0.2.1`; `PackageTest::testNoLockNoDependencyManifestNoTestsNoMock`, `testThePackageVerifiesTheGatewaysSignatureWithoutComposer` |
 | `D1` | this file is the one source; `CLAUDE.md` points at it, `docs/development.md` maps it | `CLAUDE.md` (one line), this table; `tests/Repo/ClaudeRulesTest.php` |
-| `D2` | shared compliance scenarios in `scenarios/` | odstępstwo: client-php has no scenarios yet (v0.2.0 ships none; minos-moderation/minos#44, step 5) |
+| `D2` | shared compliance scenarios in `scenarios/` | odstępstwo: client-php has no scenarios yet (v0.2.1 ships none; minos-moderation/minos#44, step 5) |
 
 ```bash
 composer install
@@ -581,7 +581,7 @@ same without phpBB.
 
 `composer.json` requires `minos-moderation/client-php` at `^0.2` from its GitHub
 repository (a `vcs` repository entry: the client is not on Packagist); `composer.lock` pins
-the tag: `v0.2.0`, commit `e5df7d6d` (`Signature::check`). Moving to a newer client is a
+the tag: `v0.2.1`, commit `56d5780f` (`Signature::check`). Moving to a newer client is a
 pull request of its own with a reviewed `composer update minos-moderation/client-php` to a
 tag (widen the constraint first when the tag is outside `^0.2`), whose lock diff shows only
 that package's entry and the content hash; never a commit of the client's `main`. The
