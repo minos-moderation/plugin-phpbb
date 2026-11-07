@@ -329,8 +329,9 @@ postu.
 Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie nadszedł w
 czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
 „poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
-wpisy 30 dni po rozstrzygnięciu: z wpisem znikają zapisany werdykt i oryginał zamaskowanego
-postu (to wszystkie dane, które rozszerzenie przechowuje o poście). Wpisy w dzienniku
+wpisy 30 dni po rozstrzygnięciu — także wtedy, gdy ocenianie jest wyłączone w ustawieniach:
+z wpisem znikają zapisany werdykt i oryginał zamaskowanego postu (to wszystkie dane, które
+rozszerzenie przechowuje o poście). Wpisy w dzienniku
 moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) i zgłoszenia
 rozszerzenia w panelu moderatora (z kopią postu, którą phpBB zachowuje przy każdym
 zgłoszeniu) zostają: to rejestry forum, przechowywane według zasad forum. Na forach o małym
@@ -341,12 +342,16 @@ wywoływany odsłonami stron może się opóźniać.
 
 Wyłączone ocenianie oznacza, że rozszerzenie nic nie robi: nowe posty publikują się jak
 dawniej, nic nie jest wysyłane do bramy, webhook odpowiada `404` (brama ponawia doręczenie
-do końca swojego czasu), a zadanie cron nie działa — bez ponowień i bez trybu awarii. Posty,
+do końca swojego czasu), a zadanie cron tylko usuwa wpisy rozstrzygnięte ponad 30 dni temu
+(patrz „Zadanie cron”) — bez ponowień i bez trybu awarii. Posty,
 które czekały na werdykt, zostają w kolejce do zatwierdzenia i rozpatruje je moderator. Po
 ponownym włączeniu oceniania w ustawieniach posty, które wciąż czekały na werdykt, są
 wysyłane do oceny od nowa, z nowym czasem oczekiwania (nie trafiają od razu do trybu awarii).
 
-To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń. Po ponownym
+To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń, z jedną
+różnicą: rozszerzenie wyłączone w menedżerze nie działa wcale, więc nie usuwa też swoich
+wpisów po 30 dniach — robi to dopiero po ponownym włączeniu, a **Usuń dane** usuwa je od razu
+(patrz „Usunięcie rozszerzenia”). Po ponownym
 włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wraca do czekających
 postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.
