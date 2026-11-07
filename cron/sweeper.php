@@ -24,8 +24,10 @@ use minos\moderation\service\verdict_applier;
  * 3. sends again the posts whose retry is due;
  * 4. forgets finished rows after 30 days.
  *
- * Switched off, the extension does nothing, and neither does the task: no time-outs, no
- * retries, no pruning. The posts it held wait in phpBB's queue for a moderator. Switched on
+ * Switched off, the extension does nothing, and the task only forgets: no applying, no
+ * time-outs, no retries, but finished rows still go after 30 days (shared rule A8: the same
+ * period in every plugin, whatever the switch, so a forum's privacy notice can name it). The
+ * posts it held wait in phpBB's queue for a moderator. Switched on
  * again in the ACP, the posts still waiting are sent again with a fresh time-out
  * ({@see \minos\moderation\service\pending_store::restart_waiting}); re-enabled in the
  * extension manager, the task picks up where it stopped.
@@ -79,13 +81,15 @@ class sweeper extends \phpbb\cron\task\base
 	}
 
 	/**
-	 * Whether the task may run at all: only while the extension is switched on.
+	 * Whether the task may run at all: always, because forgetting after 30 days does not
+	 * wait for the extension to be switched on again (A8); {@see sweep} does nothing else
+	 * while it is switched off.
 	 *
 	 * @return bool
 	 */
 	public function is_runnable()
 	{
-		return $this->settings->enabled();
+		return true;
 	}
 
 	/**
@@ -111,7 +115,7 @@ class sweeper extends \phpbb\cron\task\base
 	}
 
 	/**
-	 * The four steps.
+	 * The four steps; switched off, the last one only.
 	 *
 	 * @param int $now Unix seconds.
 	 * @return array<string,int> How many rows each step touched.
@@ -119,6 +123,9 @@ class sweeper extends \phpbb\cron\task\base
 	public function sweep($now)
 	{
 		$done = array('applied' => 0, 'timed_out' => 0, 'resubmitted' => 0, 'pruned' => 0);
+		// First and whatever the switch (A8): one DELETE of finished rows only, so nothing a
+		// switched-off extension keeps waiting (queued, pending, received) is touched.
+		$done['pruned'] = $this->store->prune($now - self::RETENTION_S);
 		if (!$this->settings->enabled())
 		{
 			return $done;
@@ -156,7 +163,6 @@ class sweeper extends \phpbb\cron\task\base
 			$done['resubmitted'] = count($due);
 		}
 
-		$done['pruned'] = $this->store->prune($now - self::RETENTION_S);
 		return $done;
 	}
 }

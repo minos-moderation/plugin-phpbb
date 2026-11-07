@@ -358,7 +358,7 @@ final class AcpControllerTest extends TestCase
 
 	public function testSwitchingOnAgainSendsWhatWaitedWithAFreshTimeout(): void
 	{
-		// Shared rule D9.13: a post that waited while the extension was off used to get the
+		// Shared rule F9: a post that waited while the extension was off used to get the
 		// failure mode in the first run after it was switched on again.
 		$id = $this->board->posting('Wpis czekający na werdykt.')['post_id'];
 		$this->submit($this->form(array('minos_enabled' => '0')));
@@ -375,6 +375,60 @@ final class AcpControllerTest extends TestCase
 		self::assertSame(pending_store::PENDING, $this->board->row($id)['status'], 'sent again, not timed out');
 		self::assertSame('phpbb:' . $id . '.1', $this->board->transport->items(1)[0]['id']);
 		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testTheOldRevisionsVerdictAfterSwitchingOnAgainFilesNoReportAboutADecision(): void
+	{
+		// Before: the gateway's late delivery of revision 0, which the webhook refused while
+		// the extension was off, carried `wsparcie` and was reported as coming "after a
+		// moderator's decision or an edit" - while nobody had decided or edited anything.
+		$id = $this->board->posting('Testowy wpis o bardzo złym dniu.')['post_id'];
+		$this->submit($this->form(array('minos_enabled' => '0')));
+		$this->submit($this->form(array('minos_enabled' => '1')));
+		$this->board->sweeper()->sweep(time());
+		self::assertSame(array('1', pending_store::PENDING), array($this->board->row($id)['revision'], $this->board->row($id)['status']));
+		$old = array(
+			'id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane',
+			'kategorie' => array('samookaleczenie'), 'wsparcie' => true, 'wersja' => '3f0c9a41d2b7e8c5',
+		);
+
+		self::assertSame(200, $this->board->deliver($old));
+
+		self::assertSame(array(), $this->board->reports->of($id), 'no report about a decision nobody made');
+		self::assertSame(array(), $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(array('1', pending_store::PENDING), array($this->board->row($id)['revision'], $this->board->row($id)['status']),
+			'the old verdict is not applied');
+
+		// A real edit after that still raises the signal of the revision it replaced.
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+		self::assertSame('2', (string) $this->board->row($id)['revision']);
+		self::assertSame(200, $this->board->deliver(array('id' => 'phpbb:' . $id . '.1') + $old));
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports, 'the text the edit replaced is reported');
+		self::assertStringContainsString('po edycji postu', $reports[0]['report_text']);
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+	}
+
+	public function testAnEditedPostsEarlierRevisionStillReportsItsSupportAfterSwitchingOnAgain(): void
+	{
+		// Review of #12: switching on again marked every revision up to the restarted one as
+		// signalled, so the text an edit had replaced lost its signal for good.
+		$id = $this->board->posting('Testowy wpis o bardzo złym dniu.')['post_id'];
+		$this->board->edit($id, 'Poprawiony wpis testowy.');
+		$this->submit($this->form(array('minos_enabled' => '0')));
+		$this->submit($this->form(array('minos_enabled' => '1')));
+		self::assertSame('2', (string) $this->board->row($id)['revision']);
+
+		self::assertSame(200, $this->board->deliver(array(
+			'id' => 'phpbb:' . $id, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane',
+			'kategorie' => array('samookaleczenie'), 'wsparcie' => true, 'wersja' => '3f0c9a41d2b7e8c5',
+		)));
+
+		$reports = $this->board->reports->of($id);
+		self::assertCount(1, $reports, 'the text the edit replaced is reported, once');
+		self::assertStringContainsString('po edycji postu', $reports[0]['report_text']);
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility'], 'the old verdict is not applied');
 	}
 
 	public function testSavingWhileSwitchedOnRestartsNothing(): void

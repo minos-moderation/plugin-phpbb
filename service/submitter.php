@@ -26,7 +26,7 @@ use minos\moderation\platform\forum;
  * Before the request leaves, each row stores the digest of its text (`sent_md5`). The wait
  * for a verdict - the time-out - is counted from the gateway's `202`.
  *
- * Only `202` accepts (the plugins' shared rule D9.6, `F5a` of client-php's
+ * Only `202` accepts (the plugins' shared rule `F5a` of client-php's
  * `docs/plugin-behaviour.md`):
  *
  * - `202`: each item its `przyjete` names waits for its webhook; an item it does not name is
@@ -36,7 +36,7 @@ use minos\moderation\platform\forum;
  *   acceptance (a proxy's login page, a wrong address): the rows are retried after
  *   `blad.ponow_za_s`, or after a backoff doubling from 60 s - unless `ponow_za_s` ends after
  *   a row's time-out: no verdict can come in time, so the failure mode applies at once (the
- *   plugins' shared rule D9.3);
+ *   plugins' shared rule F5c);
  * - any other refusal (`3xx`, a `4xx` but `408` and `429`): a configuration error that retrying cannot fix. The
  *   failure mode applies, and the status and the code go to the error log and the ACP.
  *
@@ -91,6 +91,7 @@ class submitter
 	const ERROR_ANSWER = 'bad_answer';
 	const ERROR_REDIRECT = 'redirect';
 	const ERROR_EMPTY = 'empty_text';
+	const ERROR_UNREADABLE = 'unreadable_text';
 	const ERROR_NOT_CONFIGURED = 'not_configured';
 
 	/** @var settings */
@@ -169,7 +170,7 @@ class submitter
 		if (!$this->settings->is_ready())
 		{
 			// Switched on without a key, a secret or a usable gateway address: no verdict can
-			// come, so the failure mode applies at once (the plugins' shared rule D9.12).
+			// come, so the failure mode applies at once (the plugins' shared rule F8).
 			foreach ($rows as $row)
 			{
 				if ($row['status'] === pending_store::QUEUED)
@@ -219,7 +220,7 @@ class submitter
 	/**
 	 * What the gateway's pause leaves unsent: a row waits, queued, for the cron task after
 	 * the pause - unless its wait for a verdict ends before the pause does, when no verdict
-	 * can come in time and the failure mode applies at once (the plugins' shared rule D9.3).
+	 * can come in time and the failure mode applies at once (the plugins' shared rule F5c).
 	 *
 	 * @param array<int,array<string,mixed>>         $rows  Rows not sent.
 	 * @param array{kind:string,code:string,until:int} $pause The pause.
@@ -289,11 +290,19 @@ class submitter
 			return null;
 		}
 		// The title is read from the topic on every attempt: what is sent is what a reader sees now.
-		$text = forum::first_chars($this->forum->text_of($post));
+		$whole = $this->forum->text_of($post);
+		if ($whole === null)
+		{
+			// phpBB's XML that does not parse: a failed extraction, not an empty text, and
+			// nothing - not the title, not the part that parsed - is sent in its place (F7).
+			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_UNREADABLE, $now);
+			return null;
+		}
+		$text = forum::first_chars($whole);
 		if ($text === '')
 		{
 			// Nothing to assess: a post with only a link (the failure mode at once, shared rule
-			// D9.5), or one edited down to nothing while it waited. A title alone is never sent.
+			// F7), or one edited down to nothing while it waited. A title alone is never sent.
 			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_EMPTY, $now);
 			return null;
 		}

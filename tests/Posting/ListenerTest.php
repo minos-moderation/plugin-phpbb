@@ -109,7 +109,7 @@ final class ListenerTest extends TestCase
 	 */
 	public function testSwitchedOnWithoutAUsableConfigurationANewPostGetsTheFailureModeAtOnce(callable $arrange): void
 	{
-		// Shared rule D9.12: such a post used to be published as if the extension were off.
+		// Shared rule F8: such a post used to be published as if the extension were off.
 		$arrange($this->board);
 
 		$posted = $this->board->posting('Zwykły testowy wpis.');
@@ -523,6 +523,66 @@ final class ListenerTest extends TestCase
 		$event = new \phpbb\event\data(array('row' => array('post_id' => $id), 'post_row' => array('POST_SUBJECT' => 'Temat')));
 		$this->board->listener->mark_queue_row($event);
 		self::assertSame('[Minos: brak tekstu do oceny] Temat', $event['post_row']['POST_SUBJECT']);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:array<string,mixed>}>
+	 */
+	public function unreadableTexts(): array
+	{
+		// phpBB's XML mark (`<r>`, `<t>`) on a text that does not parse.
+		$broken = '<r>Testowy wpis <B><s>[b]</s>niedomknięty</r>';
+		return array(
+			'the post\'s text'  => array($broken, array()),
+			'a plain <t> text' => array('<t>Testowy wpis &amp niedomknięty</t>', array()),
+		);
+	}
+
+	/**
+	 * @dataProvider unreadableTexts
+	 */
+	public function testPhpbbsXmlThatDoesNotParseIsAFailedExtractionAndNothingIsSent(string $xml, array $options): void
+	{
+		// Shared rule F7 (2026-11-05): a failed extraction is the failure mode, and nothing -
+		// not the title, not the part that could be read - is sent in its place. Before, the
+		// text was read as phpBB 3.0's storage (its tags stripped) and sent.
+		$this->board->configure(array(settings::FAIL_MODE => settings::FAIL_OPEN));
+
+		$id = $this->board->posting('', 'post', $options + array('xml' => $xml, 'title' => 'Obraźliwy tytuł testowy'))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests, 'nothing sent');
+		$row = $this->board->row($id);
+		self::assertSame(array(pending_store::PUBLISHED, 'unreadable_text'), array($row['status'], $row['error_code']),
+			'the failure mode, under its own code');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_POST_PUBLISHED_FAIL_OPEN'));
+	}
+
+	public function testAPollOptionThatDoesNotParseSendsNotEvenTheTextThatDoes(): void
+	{
+		$this->gateway->refuse(503, 'kolejka_niedostepna');
+		$id = $this->board->posting('Zwykły testowy wpis.', 'post', array('poll' => array('question' => 'Pytanie testowe?', 'options' => array('Tak', 'Nie'))))['post_id'];
+		self::assertCount(1, $this->gateway->requests, 'refused, to be retried');
+		$this->board->db->sql_query("UPDATE phpbb_poll_options SET poll_option_text = '<t>Nie &amp niedomknięte</t>' WHERE poll_option_id = 2");
+
+		$this->board->sweeper()->sweep(time() + 61);
+
+		self::assertCount(1, $this->gateway->requests, 'the retry sends nothing: not the title, the question or the post\'s text');
+		// The poll changed outside the posting form after a first attempt was sent: as for any
+		// such change, the row stands aside (superseded) and the post waits for a moderator.
+		self::assertSame(array(pending_store::SUPERSEDED, 'unreadable_text'), array($this->board->row($id)['status'], $this->board->row($id)['error_code']));
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
+	public function testAFailedExtractionHeldByFailClosedTellsTheModeratorWhy(): void
+	{
+		$id = $this->board->posting('', 'post', array('xml' => '<r>Testowy wpis <B><s>[b]</s>niedomknięty</r>'))['post_id'];
+
+		self::assertSame(array(), $this->gateway->requests);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+		self::assertSame(pending_store::HELD, $this->board->row($id)['status']);
+		$details = new \phpbb\event\data(array('post_id' => $id, 'post_data' => array()));
+		$this->board->listener->show_queue_details($details);
+		self::assertSame('Minos: nie udało się odczytać tekstu postu, nic nie wysłano do oceny', $details['post_data']['MINOS_STATUS']);
 	}
 
 	public function testAnEditOfAWaitingPostIsAssessedAgainUnderANewRevision(): void

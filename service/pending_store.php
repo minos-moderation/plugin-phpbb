@@ -456,9 +456,12 @@ class pending_store
 
 	/**
 	 * Claims the signal of `wsparcie` that a verdict for an earlier revision carries (the post
-	 * was edited since, so the verdict itself is not applied): true once per post and revision,
-	 * and only for a revision older than the row's. A later claim for the same or an older
-	 * revision finds `support_signalled` there already.
+	 * was edited since, so the verdict itself is not applied): true only for a revision older
+	 * than the row's, and only when no verdict for that revision or a later one was signalled
+	 * (`support_signalled` = the newest signalled revision + 1). The claim moves forward only,
+	 * a decision rather than an oversight: once the moderators have the signal about a text
+	 * before an edit, a verdict for a text further back adds none (the post is in their reports
+	 * already; phpBB keeps one open report per post), while a newer revision's is still raised.
 	 *
 	 * @param int $post_id  The post.
 	 * @param int $revision The revision the verdict is about.
@@ -494,40 +497,85 @@ class pending_store
 	 * time-out left it unassessed (held by fail-closed, published by fail-open): a new
 	 * revision, queued now, with the previous outcome and marks forgotten.
 	 *
-	 * @param int $post_id The post.
-	 * @param int $now     Unix seconds.
+	 * A row whose gateway verdict is recorded (`received`) but not yet applied carries the
+	 * verdict's `wsparcie`, which the restart forgets with the verdict: the signal is then
+	 * owed for the old revision (A7), and `$owed` names it - the revision and the verdict -
+	 * for the caller to raise ({@see verdict_applier::signal_earlier_support}). That row is
+	 * restarted only by an update that names its revision and verdict, so a verdict recorded
+	 * between the read and the update is never forgotten unseen: the other update leaves such
+	 * a row alone and the read is tried once more.
+	 *
+	 * @param int                     $post_id The post.
+	 * @param int                     $now     Unix seconds.
+	 * @param array{0:int,1:string}|null $owed Set to the old revision and its verdict when
+	 *     the restart forgot a recorded `wsparcie`, else null.
 	 * @return bool False when the row is neither waiting nor timed out.
 	 */
-	public function restart($post_id, $now)
+	public function restart($post_id, $now, &$owed = null)
 	{
-		$sql = 'UPDATE ' . $this->table . '
-			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
-				'status'       => self::QUEUED,
-				'verdict'      => '',
-				'categories'   => '',
-				'support'      => 0,
-				'attempts'     => 0,
-				'submitted_at' => (int) $now,
-				'retry_at'     => (int) $now,
-				'error_code'   => '',
-				'masked_text'  => '',
-				'sent_md5'     => '',
-				'approved_at'  => 0,
-				'approved_md5' => '',
-				'received_at'  => 0,
-			)) . '
-			WHERE post_id = ' . (int) $post_id . '
-				AND ' . $this->reopenable();
-		$this->db->sql_query($sql);
-		return $this->db->sql_affectedrows() === 1;
+		$owed = null;
+		for ($attempt = 0; $attempt < 2; $attempt++)
+		{
+			$row = $this->find($post_id);
+			if ($row === null)
+			{
+				return false;
+			}
+			$support = ((string) $row['status'] === self::RECEIVED && (int) $row['support'] === 1);
+			$which = $support
+				? "status = '" . self::RECEIVED . "' AND support = 1 AND revision = " . (int) $row['revision'] . "
+					AND verdict = '" . $this->db->sql_escape((string) $row['verdict']) . "'"
+				: $this->reopenable() . " AND NOT (status = '" . self::RECEIVED . "' AND support = 1)";
+			$sql = 'UPDATE ' . $this->table . '
+				SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+					'status'       => self::QUEUED,
+					'verdict'      => '',
+					'categories'   => '',
+					'support'      => 0,
+					'attempts'     => 0,
+					'submitted_at' => (int) $now,
+					'retry_at'     => (int) $now,
+					'error_code'   => '',
+					'masked_text'  => '',
+					'sent_md5'     => '',
+					'approved_at'  => 0,
+					'approved_md5' => '',
+					'received_at'  => 0,
+				)) . '
+				WHERE post_id = ' . (int) $post_id . '
+					AND ' . $which;
+			$this->db->sql_query($sql);
+			if ($this->db->sql_affectedrows() === 1)
+			{
+				if ($support)
+				{
+					$owed = array((int) $row['revision'], (string) $row['verdict']);
+				}
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
 	 * Starts the assessment again for every row still waiting for a verdict (`queued`,
 	 * `pending`), when the extension is switched on again: while it was off nothing was sent,
 	 * and the webhook refused the gateway's deliveries. Each row becomes a new revision,
-	 * queued now, with a fresh time-out (the plugins' shared rule D9.13). A recorded verdict
+	 * queued now, with a fresh time-out (the plugins' shared rule F9). A recorded verdict
 	 * (`received`) is left to be applied.
+	 *
+	 * The revision before the restart is no earlier text a person replaced: the same text is
+	 * sent again, and its new verdict carries its own `wsparcie`. So that the gateway's late
+	 * delivery of the old revision's verdict, which the webhook refused while switched off,
+	 * files no report saying it came "after a moderator's decision or an edit", the old
+	 * revision's signal counts as claimed ({@see claim_earlier_support}) - but only when every
+	 * revision before it is claimed already (`support_signalled` = `revision`, as on a post
+	 * never edited). Otherwise the claim stays where it is: an earlier revision an edit
+	 * replaced may still bring its signal, and the claim only moves forward, so moving it past
+	 * that revision would lose a real signal to save a redundant one. The column is assigned
+	 * before `revision`, so its `CASE` reads the old revision on every database phpBB supports
+	 * (MySQL assigns left to right with the values already assigned; PostgreSQL, SQLite,
+	 * MSSQL and Oracle read the old row throughout).
 	 *
 	 * @param int $now Unix seconds.
 	 * @return int Rows restarted.
@@ -535,7 +583,8 @@ class pending_store
 	public function restart_waiting($now)
 	{
 		$this->db->sql_query('UPDATE ' . $this->table . '
-			SET revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
+			SET support_signalled = CASE WHEN support_signalled = revision THEN revision + 1 ELSE support_signalled END,
+				revision = revision + 1, ' . $this->db->sql_build_array('UPDATE', array(
 				'status'       => self::QUEUED,
 				'verdict'      => '',
 				'categories'   => '',

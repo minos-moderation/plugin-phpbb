@@ -14,6 +14,7 @@ use minos\moderation\platform\forum;
 use minos\moderation\service\pending_store;
 use minos\moderation\service\settings;
 use minos\moderation\service\submitter;
+use minos\moderation\service\verdict_applier;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -31,9 +32,9 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * replies with neither text to assess, a link nor a subject of their own (attachments only);
  * and everything while the extension is off. Switched on but unable to submit (no key, no secret, no usable gateway
  * address), it holds new posts and gives them the failure mode at once (the plugins' shared
- * rule D9.12). A post with a link or a title (a new topic, a reply's own subject) but no text
+ * rule F8). A post with a link or a title (a new topic, a reply's own subject) but no text
  * to assess is held and goes to the failure mode at once, without a request (the plugins'
- * shared rule D9.5): a link, even one with a blank text, and a title never pass unassessed,
+ * shared rule F7): a link, even one with a blank text, and a title never pass unassessed,
  * and a title is never sent alone. Switched off, the
  * extension does nothing at all: an edit of a post it held is not sent either, and the post
  * waits for a moderator.
@@ -79,6 +80,9 @@ class listener implements EventSubscriberInterface
 	/** @var \phpbb\user */
 	protected $user;
 
+	/** @var verdict_applier */
+	protected $applier;
+
 	/**
 	 * @param settings                 $settings  The administrator's settings.
 	 * @param pending_store            $store     The pending rows.
@@ -87,9 +91,11 @@ class listener implements EventSubscriberInterface
 	 * @param \phpbb\auth\auth         $auth      The poster's permissions.
 	 * @param \phpbb\language\language $language  The MCP labels.
 	 * @param \phpbb\user              $user      The poster (a new post is always the current user's).
+	 * @param verdict_applier          $applier   For the `wsparcie` of a recorded verdict an edit
+	 *     overtook.
 	 */
 	public function __construct(settings $settings, pending_store $store, forum $forum, submitter $submitter,
-		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user)
+		\phpbb\auth\auth $auth, \phpbb\language\language $language, \phpbb\user $user, verdict_applier $applier)
 	{
 		$this->settings = $settings;
 		$this->store = $store;
@@ -98,6 +104,7 @@ class listener implements EventSubscriberInterface
 		$this->auth = $auth;
 		$this->language = $language;
 		$this->user = $user;
+		$this->applier = $applier;
 	}
 
 	/**
@@ -193,7 +200,24 @@ class listener implements EventSubscriberInterface
 		}
 
 		$now = time();
-		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now) : $this->store->create($post_id, $now);
+		$owed = null;
+		$queued = ($flag === self::REASSESS) ? $this->store->restart($post_id, $now, $owed) : $this->store->create($post_id, $now);
+		if ($owed !== null)
+		{
+			// The edit overtook a verdict recorded but not yet applied (the webhook applies it
+			// after its answer, or the cron task): the verdict is for the old text and is
+			// dropped, but its `wsparcie` is owed (A7), as for a verdict that arrives after the
+			// edit. The gateway will not deliver it again, so a failure is logged, never thrown
+			// into the author's posting.
+			try
+			{
+				$this->applier->signal_earlier_support($post_id, $owed[0], $owed[1]);
+			}
+			catch (\Throwable $e)
+			{
+				$this->forum->log_support_lost($post_id);
+			}
+		}
 		if (!$queued)
 		{
 			// Nothing to assess it with: the moderators get phpBB's e-mail, held back for it
@@ -306,7 +330,7 @@ class listener implements EventSubscriberInterface
 	 * Whether a new post is to be held and assessed: every post the settings cover, whatever
 	 * it holds. One without text to assess - blank, only images, attachments or videos, only
 	 * a link with a blank label, a title alone - is held too, and gets the failure mode at once
-	 * without a request (the plugins' shared rules D9.5 and F7): what a reader sees of it is
+	 * without a request (the plugins' shared rule F7): what a reader sees of it is
 	 * nothing the gateway assesses, so the failure mode decides it instead.
 	 *
 	 * @param array<string,mixed> $data     phpBB's post data going to be stored.
@@ -351,6 +375,10 @@ class listener implements EventSubscriberInterface
 		if ($pending['error_code'] === submitter::ERROR_EMPTY)
 		{
 			return 'MINOS_MCP_NO_TEXT';
+		}
+		if ($pending['error_code'] === submitter::ERROR_UNREADABLE)
+		{
+			return 'MINOS_MCP_UNREADABLE';
 		}
 		return ($pending['verdict'] !== '') ? 'MINOS_MCP_VERDICT_' . strtoupper((string) $pending['verdict']) : 'MINOS_MCP_HANDLED';
 	}

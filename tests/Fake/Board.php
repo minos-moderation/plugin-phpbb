@@ -172,7 +172,7 @@ class Board
 		$board->receiver = new receiver($board->settings, $board->store, $board->applier);
 		$board->deferred = new deferred_verdicts($board->applier, $board->forum);
 		$board->dispatcher = new RecordingDispatcher();
-		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user);
+		$board->listener = new listener($board->settings, $board->store, $board->forum, $board->submitter, $board->auth, $board->language, $board->user, $board->applier);
 		// phpBB's dispatcher runs the extension's listener inside the notification manager.
 		$board->notifications->on_add = static function (\phpbb\event\data $event) use ($board) {
 			$events = listener::getSubscribedEvents();
@@ -676,6 +676,6 @@ class Board
 		$this->submitter = new submitter($this->settings, $this->store, $this->forum, $this->transport, $this->applier);
 		$this->receiver = new receiver($this->settings, $this->store, $this->applier);
 		$this->deferred = new deferred_verdicts($this->applier, $this->forum);
-		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language, $this->user);
+		$this->listener = new listener($this->settings, $this->store, $this->forum, $this->submitter, $this->auth, $this->language, $this->user, $this->applier);
 	}
 }

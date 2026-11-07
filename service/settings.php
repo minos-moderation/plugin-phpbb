@@ -258,7 +258,7 @@ class settings
 	/**
 	 * Whether the extension can submit posts: switched on, with a gateway, a key and a secret.
 	 * Switched on without them, it holds new posts and gives them the failure mode at once
-	 * (the plugins' shared rule D9.12), and every ACP page says why ({@see problems}).
+	 * (the plugins' shared rule F8), and every ACP page says why ({@see problems}).
 	 *
 	 * @return bool
 	 */

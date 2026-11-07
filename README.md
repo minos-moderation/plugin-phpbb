@@ -61,7 +61,7 @@ dzieje się z nimi po ponownym włączeniu — patrz „Wyłączenie”.
 | Sekret webhooka | — | Sekret podany raz, razem z kluczem. Strona pokazuje tylko jego początek; puste pole zachowuje zapisany sekret. Bez sekretu każde doręczenie jest odrzucane. |
 | Profil oceny | `forum_adult` | `forum_adult` („Forum dla dorosłych”) albo `forum_teen` („Forum dla dzieci i młodzieży”, ocena surowsza). Profil musi być dozwolony dla klucza. |
 | Tryb awarii | **fail-closed** | Co zrobić z postem bez werdyktu — patrz „Tryb awarii”. |
-| Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt przez 15 minut; po tym czasie (z zapasem) post obsługuje tryb awarii. |
+| Czas oczekiwania na werdykt | 20 minut | Od 20 do 1440 minut, liczone od chwili, gdy brama przyjęła post (odpowiedź `202`); dla postu, którego brama jeszcze nie przyjęła (np. była przeciążona) — od jego wstrzymania. Brama próbuje doręczyć werdykt do chwili krótko przed upływem 15 minut od przyjęcia postu (przy domyślnych ustawieniach bramy około 12 minut); po tym czasie (z zapasem) post obsługuje tryb awarii. |
 | Werdykt „ocenzurowane” | publikuj z maskowaniem | Publikacja tekstu z zamaskowanymi fragmentami albo pozostawienie w kolejce. |
 | Werdykt „zablokowane” | zostaw w kolejce | Pozostawienie w kolejce albo miękkie usunięcie (moderator może post przywrócić). Post z sygnałem `wsparcie` nigdy nie jest usuwany ani cofany automatycznie: nowy zostaje w kolejce, opublikowany zostaje opublikowany i trafia do zgłoszeń moderatorów (patrz „Wsparcie”). |
 | Fora | wszystkie | Fora, w których nowe posty są oceniane. |
@@ -241,7 +241,7 @@ Do bramy trafia wyłącznie:
   awarii (patrz niżej);
 - wybrany profil;
 - liczba linków w poście, do 10 domen, na które prowadzą (np. `example.com`), i to, czy to
-  pierwszy post autora (dla gości — nie). Adres obrazka (`[img]`) ani filmu (`[flash]`) nie
+  pierwszy post autora (dla gościa ten sygnał nie jest wysyłany). Adres obrazka (`[img]`) ani filmu (`[flash]`) nie
   jest linkiem: nie jest liczony ani wysyłany; obrazek, który sam jest linkiem
   (`[url=…][img]…[/img][/url]`), liczy się jako link do adresu z `[url]`.
 
@@ -282,6 +282,12 @@ Braille'a — także obok obrazka albo w opisie linku) i z
 nowym tematem albo odpowiedzią z własnym
 tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
 jest zwykłym tekstem: post zostaje wysłany i oceniony.
+
+Tak samo, od razu w trybie awarii i bez wysyłania czegokolwiek, kończy się post, którego
+zapisanego tekstu (albo ankiety) rozszerzenie nie potrafi odczytać, bo zapis phpBB jest
+uszkodzony; notatka w panelu moderatora: „nie udało się odczytać tekstu postu”. Do bramy nie
+trafia wtedy ani tytuł, ani odczytana część. Posty w starym formacie zapisu z phpBB 3.0
+(jeszcze nieprzekonwertowane) są odczytywane razem ze znacznikami i wysyłane do oceny.
 
 ## Czas do werdyktu i liczba werdyktów
 
@@ -329,8 +335,10 @@ postu.
 Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie nadszedł w
 czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
 „poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
-wpisy 30 dni po rozstrzygnięciu: z wpisem znikają zapisany werdykt i oryginał zamaskowanego
-postu (to wszystkie dane, które rozszerzenie przechowuje o poście). Wpisy w dzienniku
+wpisy 30 dni po rozstrzygnięciu — także wtedy, gdy ocenianie jest wyłączone w ustawieniach:
+z wpisem znika wszystko, co rozszerzenie przechowuje o poście: werdykt bramy z kategoriami
+i sygnałem `wsparcie`, zamaskowany tekst od bramy, oryginał zamaskowanego postu, skróty
+(MD5) wysłanego i opublikowanego tekstu, kod błędu oraz stan i czasy oceny. Wpisy w dzienniku
 moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) i zgłoszenia
 rozszerzenia w panelu moderatora (z kopią postu, którą phpBB zachowuje przy każdym
 zgłoszeniu) zostają: to rejestry forum, przechowywane według zasad forum. Na forach o małym
@@ -341,12 +349,16 @@ wywoływany odsłonami stron może się opóźniać.
 
 Wyłączone ocenianie oznacza, że rozszerzenie nic nie robi: nowe posty publikują się jak
 dawniej, nic nie jest wysyłane do bramy, webhook odpowiada `404` (brama ponawia doręczenie
-do końca swojego czasu), a zadanie cron nie działa — bez ponowień i bez trybu awarii. Posty,
+do końca swojego czasu), a zadanie cron tylko usuwa wpisy rozstrzygnięte ponad 30 dni temu
+(patrz „Zadanie cron”) — bez ponowień i bez trybu awarii. Posty,
 które czekały na werdykt, zostają w kolejce do zatwierdzenia i rozpatruje je moderator. Po
 ponownym włączeniu oceniania w ustawieniach posty, które wciąż czekały na werdykt, są
 wysyłane do oceny od nowa, z nowym czasem oczekiwania (nie trafiają od razu do trybu awarii).
 
-To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń. Po ponownym
+To samo dotyczy wyłączenia albo usunięcia rozszerzenia w menedżerze rozszerzeń, z jedną
+różnicą: rozszerzenie wyłączone w menedżerze nie działa wcale, więc nie usuwa też swoich
+wpisów po 30 dniach — robi to dopiero po ponownym włączeniu, a **Usuń dane** usuwa je od razu
+(patrz „Usunięcie rozszerzenia”). Po ponownym
 włączeniu rozszerzenia w menedżerze (bez zmiany ustawienia) zadanie cron wraca do czekających
 postów tam, gdzie skończyło: te, których czas oczekiwania minął, obsługuje tryb awarii. Aby
 wysłać je od nowa, wyłącz i włącz ocenianie w ustawieniach.

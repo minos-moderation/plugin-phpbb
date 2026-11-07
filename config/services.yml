@@ -79,6 +79,7 @@ services:
             - '@auth'
             - '@language'
             - '@user'
+            - '@minos.moderation.applier'
         tags:
             - { name: event.listener }
 

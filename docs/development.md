@@ -70,7 +70,7 @@ reassessed instead: the post goes back to the queue (`ITEM_REAPPROVE` when it wa
 as a new revision, `phpbb:<id>.<n>` (`event/listener.php`, `pending_store::is_reopenable`);
 a verdict for the text before the edit is not applied, but its `wsparcie` is (A7, below).
 An edit of a post published on a verdict, or published unassessed after `nieocenione` or a
-refusal, is not reassessed (the shared rule D9.2 is deferred until the gateway's capacity
+refusal, is not reassessed (the shared rule S6 is deferred until the gateway's capacity
 decision).
 "Back to the queue" is phpBB's `ITEM_REAPPROVE`, which the MCP queue lists.
 
@@ -79,10 +79,18 @@ decision).
 - **Fail-closed is the default** (as in the WordPress and MyBB plugins): an unassessed post
   waits for a human. An unrecognised stored value reads as fail-closed too.
 - **Switched off, the extension does nothing**: the webhook answers `404` before reading
-  anything, nothing is sent, the cron task is not runnable. Held posts wait for moderators.
+  anything, nothing is sent, and the cron task only forgets finished rows after 30 days
+  (`sweeper::sweep` prunes before it checks the switch; A8 holds whatever the switch, as in
+  the WordPress and MyBB plugins, review C-3). Held posts wait for moderators.
   Switched on again in the ACP, every row still waiting (`queued`, `pending`) becomes a new
   revision, queued with a fresh time-out (`pending_store::restart_waiting`; the plugins'
-  shared rule D9.13). Re-enabled in the extension manager with the setting left on, the cron
+  shared rule F9). The old revision's verdict, which the gateway may still deliver, is
+  not applied, and its `wsparcie` files no report "after a decision": nobody decided, the
+  same text goes again and brings its own (the restart marks the old revision's signal as
+  claimed, `support_signalled`, when every revision before it is claimed already; after an
+  edit whose earlier revision has not signalled yet, the claim stays, because it only moves
+  forward and that revision's signal is real: a redundant report rather than a lost one;
+  `AcpControllerTest`). Re-enabled in the extension manager with the setting left on, the cron
   task resumes where it stopped (overdue rows get the failure mode).
 - **A disabled board still takes the gateway's deliveries** (review of #7, C-45). phpBB
   answers a guest on a disabled board (`board_disable`) or over its load limit (`limit_load`)
@@ -107,15 +115,15 @@ decision).
   its `install/` directory (an update of phpBB in progress, `allow_install_dir` off), which
   answers the same `200` page and respects no constant the extension may define; the README
   advises switching the assessment off for an update of phpBB.
-- **Switched on without a usable configuration, the failure mode** (shared rule D9.12): with
+- **Switched on without a usable configuration, the failure mode** (shared rule F8): with
   no key, no secret or no usable gateway address, new posts are held as usual and get the
   failure mode at once (`refused`, `not_configured`), without a request; every ACP page says
   what is missing (`event/acp_notice.php` on `core.adm_page_header`, rendered by
   `adm/style/event/acp_overall_header_body_before.html`), never a stored value. A fresh
   installation starts switched off. Finished rows - the original of a masked post, the
-  verdict - are kept 30 days (D9.11), pruned by the cron task.
-- **A post without text to assess is the failure mode** (the plugins' shared rules D9.5 and
-  F7 of client-php's `docs/plugin-behaviour.md`): every post the settings cover is held
+  verdict - are kept 30 days (A8), pruned by the cron task.
+- **A post without text to assess is the failure mode** (the plugins' shared rule F7
+  of client-php's `docs/plugin-behaviour.md`): every post the settings cover is held
   (`listener::should_hold` no longer looks at the text), and one whose text sent would be
   empty gets the failure mode at once, without a request; the MCP notes "brak tekstu do
   oceny" (`error_code` `empty_text`). Empty means nothing a reader reads: only an image
@@ -136,7 +144,7 @@ decision).
   moderators are not held. A post phpBB queues anyway (no `f_noapprove`; by phpBB's
   defaults the newly registered users, see "phpBB APIs") is left to the moderators and not
   sent: nothing would be done with its verdict. The advisory mode for that queue (send such
-  posts, let the verdict only annotate them) is the deferred shared rule D9.4, not done.
+  posts, let the verdict only annotate them) is the deferred shared rule S7, not done.
 - **The administrator chooses whose posts are assessed: user groups** (audit K-53). A post
   is held only when its author belongs to one of the groups chosen in the ACP
   (`settings::group_ids`, a JSON list in `config_text`); none chosen means every group, the
@@ -162,7 +170,7 @@ decision).
   while the post waits is a new revision (an edit) or a verdict that no longer applies. A
   masked text that touches the title (or the blank line) holds the post: the extension never
   changes a title (`forum::masked_body`).
-- **A poll is assessed with the post that carries it** (shared rule D9.1: a poll's question
+- **A poll is assessed with the post that carries it** (shared rule S5: a poll's question
   and options are part of the text of the post that carries the poll). In phpBB the poll is
   the topic's and is created and edited with its first post: that post's text sent is the
   title, a blank line, the question and each option on a line of its own, a blank line and
@@ -179,10 +187,17 @@ decision).
   `ATTACHMENT` and `FLASH` add no text (`forum::MEDIA_ELEMENTS`: their content is an address
   or a file name the reader does not read), and the `title`/`alt` attributes collected are
   added only beside other text, never alone (F7). A stored text
-  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing. The XML
+  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing: a whole
+  reading with markup to spare, not a failed one. A text phpBB itself takes for its XML
+  (`forum::XML_MARK`, `#^<[rt][ >]#`, the test of `generate_text_for_display()`) that does
+  not parse is a failed extraction (F7, 2026-11-05): `plain_text` gives null, `text_of`
+  too (also for a poll's question or option), and the post gets the failure mode at once
+  with `error_code` `unreadable_text` ("nie udało się odczytać tekstu postu" in the MCP),
+  nothing sent - not the title, not the part that parsed. Before, it was read as phpBB
+  3.0's storage, its tags stripped, and sent (`ListenerTest`, `RealFormatterFixtureTest`). The XML
   parser is PHP's DOM, which phpBB 3.3 itself requires (its text formatter does).
 - **A refusal that outlasts the wait is the failure mode at once** (the plugins' shared rule
-  D9.3(a)): when `ponow_za_s`, taken as sent (not shortened to the retry cap), ends after a
+  F5c): when `ponow_za_s`, taken as sent (not shortened to the retry cap), ends after a
   row's time-out, the row gets the failure mode (`timeout`, with the refusal's code) instead
   of a retry no verdict could follow.
 - **One refused request, not one per post: the shared pause of sending** (audit K-39). Every
@@ -195,10 +210,10 @@ decision).
   `shared_pause` migrations). While it lasts `submitter::submit` sends nothing: a post from an
   author's request stays `queued` for the cron task, and a run of the cron task stops before
   its next batch (`hold_back`). A row whose time-out comes before the pause ends gets the
-  failure mode at once, with the pause's code (D9.3). Each refusal by the key's limits spends
+  failure mode at once, with the pause's code (F5c). Each refusal by the key's limits spends
   its allowance (the contract: only a refusal the key did not cause is free), hence the pause.
   A `500`, `502` or `504` is retried per row and pauses nothing.
-- **Only `202` accepts** (the plugins' shared rule D9.6, client-php's `F5a`): a `202` accepts
+- **Only `202` accepts** (the plugins' shared rule `F5a` of client-php's `docs/plugin-behaviour.md`): a `202` accepts
   each item its `przyjete` names, and an item it leaves out is retried (`bad_answer`, the
   backoff) while the others wait for their webhooks; any other `2xx`, also one naming every
   item, is retried with the backoff and pauses the sending as a `503` does (`http_<status>`),
@@ -260,7 +275,9 @@ decision).
   delivery is dropped before it (the row is no longer `received`). Any other refusal (the
   post gone, a check another extension adds on `core.report_post_auth` after this one) leaves
   the post published and writes `LOG_MINOS_SUPPORT_REPORT_FAILED` into the error log: the
-  post's id and phpBB's code (a language key, else the exception's class), never its text. The report keeps phpBB's
+  post's id and phpBB's code (a language key, else the exception's class), never its text;
+  so does a board that lacks the reason "other" or the guest's account (codes
+  `NO_REASON_OTHER`, `NO_GUEST_USER`; before, that report failed without a trace). The report keeps phpBB's
   copy of the post as reported, as every report does, under the forum's rules (A8).
   **The signal comes also after a person decided** (A7's "whatever the verdict"; the owner's
   decision of 2026-11-01: the person's decision is about the post's visibility, not about
@@ -275,6 +292,18 @@ decision).
   (`pending_store::claim_earlier_support`, the `support_signalled` column of migration
   `support_signal`: that revision + 1) in one transaction with the report, before the
   webhook's answer, so a failure rolls both back and the gateway's next delivery tries again.
+  The claim moves forward only, by decision: a verdict for an older revision that arrives
+  after a newer revision's signal adds no second one (the moderators have the post in their
+  reports for a text before an edit already, and phpBB keeps one open report per post);
+  a newer revision's after an older one's is raised (`SupportAfterDecisionTest`).
+  An edit that overtakes a verdict already recorded but not yet applied (the row
+  `received`: the webhook applies after its answer, the cron task after a stop) drops that
+  verdict as well, and its `wsparcie` is raised at once, in the editing request, as for a
+  verdict that arrives after the edit (`pending_store::restart` names the old revision and
+  verdict, restarting such a row only by an update that names both; `listener` raises it
+  through `verdict_applier::signal_earlier_support`). The gateway does not deliver that
+  verdict again, so a failure there is never thrown into the author's posting: the claim and
+  the report roll back and the error log gets `LOG_MINOS_SUPPORT_LOST` with the post's id.
   A post that is gone (phpBB's "disapprove" deletes a queued post) cannot be reported: the
   error log gets `LOG_MINOS_SUPPORT_POST_GONE` with its id.
 - **Soft-deleting an unapproved post approves it first.** `content_visibility` accounts an
@@ -331,17 +360,51 @@ decision).
 ## The shared rules
 
 The rules every Minos plugin shares are client-php's `docs/plugin-behaviour.md`; the
-entries above say how this extension carries them out. This table names, for the rules
-whose form differs between the plugins, this extension's mechanism, a deviation, or an
-optional rule left out.
+entries above say how this extension carries them out. This table maps every identifier (D1)
+to the code and the tests that implement it, to an `odstępstwo` with the issue that closes
+it, or to an optional rule left out. It follows the rules as client-php's `main` states
+them, F10 and the 2026-11-05 wording (F7, S1, S2, S3, A7, D1) included, which its next tag
+carries; the lock is at `v0.2.0`.
 
 | Id | In short | phpBB: mechanism, or deviation |
 |---|---|---|
+| `F1` | fail-closed by default | `settings::fail_mode` (`fail-closed` the default; any unknown stored value reads as fail-closed); `ExtensionTest::testANewInstallationStartsOffWithTheDocumentedDefaults`, `testAnUnrecognisedStoredValueNeverPublishesByItself`, `WebhookTest::testUnassessedFollowsTheFailureMode` |
+| `F2` | a time-out of at least 20 minutes | `settings::timeout_seconds` (20 to 1440 minutes, a lower stored value reads as 20), counted from the `202`; `ExtensionTest::testTheTimeoutIsNeverUnderTwentyMinutes`, `SweeperTest::testTheWaitForAVerdictCountsFromTheGatewaysAcceptance` |
+| `F3` | switched off: 404, and nothing happens | `receiver::receive` (404 before reading anything), `listener` (nothing held or sent), `sweeper::sweep` (no apply, time-out or retry; only the 30-day pruning of A8, which holds whatever the switch); `WebhookTest::testSwitchedOffTheWebhookAnswers404AndRecordsNothing`, `ListenerTest::testSwitchedOffAnEditOfAWaitingPostIsNotSent`, `SweeperTest::testSwitchedOffTheTaskOnlyForgetsAndHeldPostsWaitForAModerator` |
+| `F4` | 401 without a usable secret | `settings::valid_secret` (16-255 visible ASCII characters) before `Signature::check` in `receiver::receive`; `WebhookTest::testWithoutAUsableStoredSecretEveryDeliveryIsRefused` |
+| `F5a` | retry 429, 5xx, 408, network failures and a 2xx that accepts nothing; only `202` accepts | `submitter` ("Only `202` accepts" and the shared pause above); `SubmitterTest::testOnlyA202AcceptsAnyOther2xxIsRetriedWithAPause`, `testA408IsANetworkFailureRetriedWithAPause`, `testA202AcceptsTheItemsItNamesAndTheRestIsRetried`, `MockGatewayTest::testOnlyTheMocksAcceptanceAcceptsAPostOverHttp` |
+| `F5b` | any other 4xx is a configuration error | `submitter` (the failure mode, the error log with the code only); `SubmitterTest::testAConfigurationRefusalAppliesTheFailureModeAndRecordsOnlyTheCode`, `testARedirectIsAConfigurationError` |
+| `F5c` | a `ponow_za_s` past the time-out: the failure mode at once | `submitter` (`ponow_za_s` as sent, before the retry cap; also a pause that outlasts a row's wait); `SubmitterTest::testARefusalEndingAfterThePostsTimeoutAppliesTheFailureModeAtOnce`, `testAPostWhoseWaitEndsBeforeThePauseGetsTheFailureModeAtOnceUnsent` |
 | `F5d` | optional: re-send what fail-open published unassessed once the limit renews | not implemented: the rule is optional and off by default (nie wdrożono, reguła opcjonalna); not a deviation |
-| `F7`, `S2` | an image's address is not text and not a link | `forum::MEDIA_ELEMENTS` add no text (`plain_text`) and no link (`links_of`): the `<URL>` phpBB puts inside `IMG` and `FLASH` is neither counted in `meta.links` nor listed in `meta.link_domains`; `ListenerTest` "an image's address is neither counted as a link nor its domain sent" |
-| `F10` | the receiver answers `2xx` only for a stored verdict; a platform page in its place must be a non-`2xx` | odstępstwo: during an update of phpBB (its `install/` directory present, `allow_install_dir` off) `user::setup()` answers every request, the webhook's too, with phpBB's "board disabled" page and `200` before the webhook's controller runs, so the verdict is lost; the switch does not help the webhook (it answers `200` with the assessment off too, so verdicts delivered then are lost), but the README still tells the administrator to switch the assessment off for the update, because switching it on again calls `pending_store::restart_waiting`, which sends every open post again as a new revision (F9); to be fixed after the whole-project review. Otherwise: `service\receiver::receive` records the verdict (`pending_store::record_verdict`, the row `received`) before the controller answers `200`, and applies it after the answer, or from the cron task (`Cron\FailureIsolationTest::testALeftoverVerdictThatFailsLeavesTheOthersToBeApplied`); a repeat, another revision or an unknown id answers `200` with nothing to store (`WebhookTest::testARepeatedDeliveryIsAppliedOnce`, `testAnIdThisForumDoesNotWaitForIs200AndChangesNothing`); a record the database refuses never answers `2xx` (`WebhookTest::testAVerdictTheDatabaseRefusesToRecordIsNeverAnswered2xx`: the driver's error reaches the webhook, which phpBB's database layer and `msg_handler` answer with `503`), nor does a signal of an earlier revision that cannot be filed (`SupportAfterDecisionTest::testASignalThatCannotBeFiledIsClaimedAgainOnTheNextDelivery`). A disabled or overloaded board runs the receiver (`event/webhook_access.php`; `WebhookAccessTest::testADeliveryPassesADisabledAndAnOverloadedBoard`, the live board's `test_what_the_webhook_answers_while_the_board_or_the_extension_is_off`) |
-| `S1` | an image's `alt`/`title` is sent next to the word it belongs to | deviation: the `title`/`alt` attributes are added at the end of the text, each on a line of its own (`forum::plain_text`), not beside their word. Only a board's own BBCode carries them: phpBB 3.3's default `[img]`, `[url]` and `[flash]` have none. Never alone (F7); nothing a reader does not see is added |
+| `F6` | a failing row never stops a loop | `sweeper::sweep`, `deferred_verdicts`, `submitter::submit` (a `try` per row, `forum::log_failure` with the step and the post id); `FailureIsolationTest` |
+| `F7` | no text to assess, or a failed extraction: the failure mode; a bare URL the reader sees, and visible punctuation, are text | `forum::plain_text`, `text_of` (`MEDIA_ELEMENTS`, `INVISIBLE`, a title never alone; phpBB's XML that does not parse is `unreadable_text`), `submitter::prepare` (`empty_text`); `ListenerTest::testAPostWithoutTextAReaderReadsGoesToTheFailureModeUnsent`, `testATitleOverAnImageAndAnInvisibleCharacterIsNeverSentAlone`, `testAnAddressAReaderSeesIsTextAndIsSentWithItsLink`, `testPhpbbsXmlThatDoesNotParseIsAFailedExtractionAndNothingIsSent`, `testAPollOptionThatDoesNotParseSendsNotEvenTheTextThatDoes`. An image's address: `forum::MEDIA_ELEMENTS` add no text (`plain_text`) and no link (`links_of`), see S2 |
+| `F8` | switched on without a usable configuration: the failure mode; a fresh install is off | `settings::is_ready`, `submitter` (`not_configured` at once, no request), `event/acp_notice.php`; `ListenerTest::testSwitchedOnWithoutAUsableConfigurationANewPostGetsTheFailureModeAtOnce`, `AcpNoticeTest::testSwitchedOnWithoutAUsableConfigurationEveryAcpPageSaysWhy`, `ExtensionTest::testANewInstallationStartsOffWithTheDocumentedDefaults` |
+| `F9` | switched on again: what waited is re-sent with a fresh time-out | `controller\acp` → `pending_store::restart_waiting` (a new revision, the old revision's signal claimed); `AcpControllerTest::testSwitchingOnAgainSendsWhatWaitedWithAFreshTimeout`, `testTheOldRevisionsVerdictAfterSwitchingOnAgainFilesNoReportAboutADecision` |
+| `F10` | the receiver answers `2xx` only for a stored verdict; a platform page in its place must be a non-`2xx` | odstępstwo: during an update of phpBB (its `install/` directory present, `allow_install_dir` off) `user::setup()` answers every request, the webhook's too, with phpBB's "board disabled" page and `200` before the webhook's controller runs, so the verdict is lost (minos-moderation/minos#136); the switch does not help the webhook (it answers `200` with the assessment off too, so verdicts delivered then are lost), but the README still tells the administrator to switch the assessment off for the update, because switching it on again calls `pending_store::restart_waiting`, which sends every open post again as a new revision (F9). Otherwise: `service\receiver::receive` records the verdict (`pending_store::record_verdict`, the row `received`) before the controller answers `200`, and applies it after the answer, or from the cron task (`Cron\FailureIsolationTest::testALeftoverVerdictThatFailsLeavesTheOthersToBeApplied`); a repeat, another revision or an unknown id answers `200` with nothing to store (`WebhookTest::testARepeatedDeliveryIsAppliedOnce`, `testAnIdThisForumDoesNotWaitForIs200AndChangesNothing`); a record the database refuses never answers `2xx` (`WebhookTest::testAVerdictTheDatabaseRefusesToRecordIsNeverAnswered2xx`: the driver's error reaches the webhook, which phpBB's database layer and `msg_handler` answer with `503`), nor does a signal of an earlier revision that cannot be filed (`SupportAfterDecisionTest::testASignalThatCannotBeFiledIsClaimedAgainOnTheNextDelivery`). A disabled or overloaded board runs the receiver (`event/webhook_access.php`; `WebhookAccessTest::testADeliveryPassesADisabledAndAnOverloadedBoard`, the live board's `test_what_the_webhook_answers_while_the_board_or_the_extension_is_off`) |
+| `S1` | `tekst` is what the reader sees, `title`/`alt` included; nothing hidden is added | odstępstwo: the `title`/`alt` attributes are added at the end of the text, each on a line of its own (`forum::plain_text`), not beside their word (minos-moderation/minos#136). Only a board's own BBCode carries them: phpBB 3.3's default `[img]`, `[url]` and `[flash]` have none. Never alone (F7); nothing a reader does not see is added. Otherwise: quotes with their author line, markup left out, a labelled link as its label (`SubmitterTest::testAQuoteIsSentWithItsAuthorAndAPostOfOnlyAQuoteIsHeld`, `testFormattingStaysHomeAndLinksAreCounted`, `testTitleAndAltTextIsAssessedWithTheRest`, `RealFormatterFixtureTest::testTheTextSentIsTheTextAReaderSees`) |
+| `S2` | links, domains, first post; never account data; an image's address is not a link | `forum::meta`, `links_of` (no `<URL>` inside `MEDIA_ELEMENTS`; `author_first_post` left out for a guest); `SubmitterTest::testMetaHoldsOnlyTheAllowedSignals`, `testTheRequestNeverCarriesAnEmailAnIpOrAUserId`, `testLinkDomainsAreTheRegistrableDomainsOfTheLinksAtMostTen`, `ListenerTest::testAnImagesAddressIsNeitherCountedAsALinkNorItsDomainSent` |
+| `S3` | an edit of a waiting post is `<id>.<n>`; an older revision's verdict is ignored | `listener::hold_for_assessment` (mode `edit`, by the author or a moderator), `pending_store::restart`, `submitter::item_id`; `ListenerTest::testAnEditOfAWaitingPostIsAssessedAgainUnderANewRevision`, `WebhookTest::testAVerdictForTheTextBeforeAnEditIsIgnored`, `LateVerdictTest::testAnEditOfAPostHeldByATimeoutIsAssessedAgainAndTheOldVerdictIsDropped` |
+| `S4a` | above 3000 characters: the beginning is assessed, the decision is `nieocenione` | `forum::first_chars`, `verdict_applier` (`truncated`); `SubmitterTest::testTheTextIsTheFirst3000CharactersOfThePlainText`, `WebhookTest::testSafeAboutTheBeginningOfALongerPostIsNotAVerdictOnThePost`, `testABlockOfTheBeginningOfALongerPostStillBlocks` |
+| `S4b` | the note about a cut post | `MINOS_MCP_TRUNCATED` ("wpis dłuższy niż 3000 znaków — oceniono początek", the rule's wording) in the MCP; `WebhookTest::testAHeldLongerPostCarriesANoteForTheModerator` |
+| `S4c` | `ocenzurowane` on a cut post is never applied automatically | `verdict_applier::decide` (`truncated`); `WebhookTest::testCensoredTextOfAPostLongerThanTheAssessedPartIsNeverPublished` |
+| `S5` | a topic's title (a visible reply subject, a poll) is part of `tekst`; a title is never changed | `forum::text_of`, `title_of`, `poll_of`, `masked_body`; `SubmitterTest::testANewTopicIsSentWithItsTitleFirst`, `testAReplyCarriesOnlyASubjectItsAuthorWrote`, `testATopicsPollIsSentWithItsQuestionAndOptions`, `WebhookTest::testAMaskThatTouchesTheTitleIsLeftToAModeratorAndTheTitleIsNeverChanged`, `testAMaskThatTouchesThePollIsLeftToAModeratorAndThePollIsNeverChanged` |
+| `S6` | an edit of a published post is reassessed (after the capacity decision) | not implemented yet, as the rule itself allows until the gateway's capacity decision: an edit of a post published on a verdict, or unassessed after `nieocenione` or a refusal, is left to phpBB (`ListenerTest::testAnEditOfAPublishedPostIsLeftToPhpbb`); one the fail-open time-out published is reassessed (S3) |
+| `S7` | a post the platform holds is sent and annotated (after the capacity decision) | not implemented yet, as the rule itself allows until the gateway's capacity decision: a post phpBB queues anyway (no `f_noapprove`) is left to the moderators and not sent (`ListenerTest::testAPostPhpbbQueuesForAModeratorAnywayIsNotSent`) |
+| `A1` | the digest of the sent text is checked before applying | `sent_md5` stored before the request (`mark_sending`), compared in `verdict_applier::apply`; `LateVerdictTest::testAVerdictIsNeverAppliedToTextOtherThanTheTextSent`, `WebhookTest::testAVerdictThatOvertakesTheGatewaysAcceptanceStillChecksTheTextSent`, `testARecordedVerdictWithoutTheDigestOfTheTextSentIsNotApplied` |
+| `A2a` | a mask has the sent length and differs only in `█` | `forum::masked_body`; `WebhookTest::testAMaskedTextThatDoesNotFitThePostIsLeftToAModerator` (shorter, longer, another character changed) |
+| `A2b` | what was sent is what is stored | `forum::masked_body` (the text sent equals phpBB's `unparse()` of the post); `WebhookTest::testAMaskedTextThatDoesNotFitThePostIsLeftToAModerator` (BBCode, a quote) |
+| `A2c` | the write is checked and read back | `forum::replace_text` in the applier's transaction (affected rows, the text read back); `WebhookTest::testAMaskedTextThatCannotBeStoredKeepsThePostQueuedAndNeverPublishesTheOriginal` |
+| `A2d` | the mask is shown to the moderator | `mask_manual`, `mask_failed` with `masked_text` in the MCP and the ACP list; `WebhookTest::testCensoredWithHoldKeepsThePostQueuedWithTheMaskedTextForTheModerator`, `AcpControllerTest::testAMaskedTextLeftToAModeratorIsShownInTheList` |
+| `A2e` | never the original instead of a failed mask | the applier rolls back and holds (`mask_failed`); a post with `wsparcie` the failure mode published stays as it was (A7); `WebhookTest::testAMaskedTextThatCannotBeStoredKeepsThePostQueuedAndNeverPublishesTheOriginal`, `LateVerdictTest::testALateMaskThatCannotBeStoredTakesThePostBackToTheQueue` |
+| `A3` | fail-open is marked; a late verdict applies | `approved_at`, `approved_md5`, `forum::untouched_since_approval`; `LateVerdictTest::testTheFailOpenModesOwnApprovalIsMarked`, `testALateBlockTakesThePostBackToTheQueue`, `testAChangeSinceTheFailOpenApprovalStands` |
+| `A4` | notifications once, sent by the plugin where approval sends none | `forum::approve` sends what the MCP's approval would; the queue e-mail held back until the outcome (`notify_queue`, `announced`); `NotificationTest::testANewTopicsApprovalNotifiesEachKindOnce`, `testAPostLeftInTheQueueSendsTheModeratorsExactlyOneEmail`, `LateVerdictTest::testALateSafeVerdictConfirmsThePostWithoutNotifyingAgain` |
+| `A5` | a hold is the platform's own state | phpBB's approval queue (`force_approved_state` = `ITEM_UNAPPROVED`, `ITEM_REAPPROVE` after an edit of a published post); `ListenerTest::testANewPostIsHeldAndSent` |
+| `A6` | a late verdict also applies to a post the failure mode held | `pending_store::record_verdict` (a `held` row whose verdict is `timeout`), applied as in time; `LateVerdictTest::testALateVerdictForAPostHeldByTheFailClosedModeIsApplied`, `testALateVerdictForAHeldPostAModeratorApprovedIsIgnored` |
 | `A7` | `wsparcie`: an active signal in the moderators' queue, whatever the verdict | An active signal in the MCP: a held post stays in the approval queue, marked "potrzebne wsparcie", with the queue e-mail; a published post gets a report in "Reported posts" (by the guest, reason "other"), also after a person's decision and for the text before an edit, with a note saying so; `LOG_MINOS_SUPPORT` beside each. Never deleted, rejected or hidden automatically; `SupportAfterDecisionTest`, `WebhookTest`, `LateVerdictTest` |
+| `A8` | the plugin's own data (the original, the verdicts) is kept 30 days; the platform's records follow the forum's rules | `sweeper::RETENTION_S`, `pending_store::prune`, also while switched off; the moderator log and phpBB's reports stay under the forum's rules (README, "Zadanie cron"); `SweeperTest::testFinishedRowsAreForgottenAfterThirtyDaysAndWaitingOnesAreNot`, `testSwitchedOffFinishedRowsAreStillForgottenAfterThirtyDays` |
+| `P1` | the archive carries no lock file, tests or mock, and pins the client | `bin/package.php`, `.github/scripts/check-release-archive.sh`; the lock at the tag `v0.2.0`; `PackageTest::testNoLockNoDependencyManifestNoTestsNoMock`, `testThePackageVerifiesTheGatewaysSignatureWithoutComposer` |
+| `D1` | this file is the one source; `CLAUDE.md` points at it, `docs/development.md` maps it | this table maps every identifier; odstępstwo: `CLAUDE.md` names client-php's `docs/contract.md` but not yet `docs/plugin-behaviour.md` in the one line D1 asks for, a change to the repository's rules file left to its owner (minos-moderation/minos#136) |
+| `D2` | shared compliance scenarios in `scenarios/` | odstępstwo: client-php has no scenarios yet (v0.2.0 ships none; minos-moderation/minos#44, step 5) |
 
 ```bash
 composer install
@@ -366,7 +429,7 @@ in phpBB 3.3 with the same parameters; a new one belongs in the API list below.
 | `tests/Submission` | The request's shape (URL, headers, id rule, `meta` fields and `link_domains`, no e-mail/IP/user id, the 3000-character cut, a new topic's title first and a reply's own subject, quotes sent with their author line, markup left out, `title`/`alt` kept); a topic's poll (question and options; a new revision when it changes; none in a reply); `202`, `429`/`503` with and without `ponow_za_s`, a `ponow_za_s` past the time-out (the failure mode at once) and the shared pause of sending (every kind; three posts in a minute → one refused request; a post whose wait ends first gets the failure mode unsent) until the next `202`, no answer, `408` and every `2xx` other than `202` (also one naming every item) retried with a pause, a `202` accepting only the items it names, configuration refusals (failure mode, error log with the code only), a redirect, one item spoiling a batch. |
 | `tests/Text` | The real phpBB 3.3 formatter's recorded output (`tests/fixtures/phpbb-3.3/`): the `TextUtils` double reproduces it, and the text sent from each recorded post is what a reader sees (formatting inside a word keeps it whole; an image, `[img=WxH]`, an inline attachment, a video and a link with a blank label give nothing, also beside or labelled with only invisible characters - `\p{Cf}`, a lone mark, a control, a blank filler; a letter with its combining mark and a bare or `[url]` address are text). |
 | `tests/Posting` | Which posts are held (every post covered; one without text to assess - each F7 fixture of the real formatter, and a text of marks without a base letter (U+034F, U+FE0F, U+0301 with U+20DD), in both modes - the failure mode at once and no request; an address a reader sees sent with its link; an image's or a video's address neither counted in `links` nor in `link_domains`, a linked image counted as its link, a text that is not XML counting every link; an image's title beside text only; only members of the chosen groups - a pending request to join, a guest, a damaged or stale value); edits; the MCP queue mark. |
-| `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning, the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
+| `tests/Cron` | Time-outs in both modes, retries, leftovers, pruning (also switched off, which does nothing else), the interval; a run that stops after the first answer asking to wait (`503`, `429`, no answer) and sends the rest after the pause. |
 | `tests/Acp` | `VerdictStatsTest`: posted, delivered through the webhook, read on the page - P50/P95 by nearest rank and the counts of the last 7 days, the wait from the 202 to the delivery, an edit forgetting it, no gateway request. Saving, validation (a group the board has not), the group list, the key and secret never shown, the webhook URL without a session id, the gateway's pause with its hour (never the key or a body), what is missing (on the page and, `AcpNoticeTest`, on every ACP page), switching on again re-sending what waited. |
 | `tests/Extension` | phpBB's metadata rules, the migration defaults, the 20-minute floor, the service wiring against the constructors, the route, the bundled client's location. `PackageTest`: packs from the repository's vendor/ and checks every entry, the shipped composer.json, and the unpacked package verifying the signature vector without Composer. |
 | `tests/EndToEnd` | The mock gateway of `client-php` (as Composer installs it) and its worker as real processes; the forum stand-in (`forum_router.php`) serves the real webhook controller over the same SQLite board; `foreign_router.php` answers at the gateway's address as something else would (a 200 naming every item, a 408), which is retried until the mock's 202. A7 after a person's decision over HTTP: a post approved, or edited, before its `[minos:blokuj] [minos:kategoria=samookaleczenie] [minos:dwa-razy]` verdict - delivered twice, one report each, the approval and the new text's own verdict standing; none without `wsparcie`. |
@@ -465,7 +528,7 @@ What the live board showed (2026-10-28, phpBB 3.3.19 at `6c75df1`, PHP 8.3, MySQ
   "Composer"); a clone with `composer install` (development packages) maps `phpbb\` onto
   `tests/stubs/` and breaks the board (`500` on every page). Install from the package.
 - The queue e-mail to moderators (K-60), the MCP marks, the masked text as readers see it, the
-  ACP form, "Delete data" and switching on again (a new revision, D9.13): as described above.
+  ACP form, "Delete data" and switching on again (a new revision, F9): as described above.
 
 ## Text fixtures
 
@@ -541,7 +604,7 @@ The version lives in ONE place the release workflow checks: `"version"` in `comp
 keeps no changelog; the release notes are GitHub's generated ones. The workflow, not a
 person, creates the release, and only after its checks pass.
 
-1. Set `"version"` in `composer.json` to the release (`0.1.0-dev` → `0.1.0`) in a pull request, and merge it. On every pull request the `release-archive` job
+1. Set `"version"` in `composer.json` to the release (it reads `0.1.0`, the first release) in a pull request, and merge it. On every pull request the `release-archive` job
    of `tests.yml` already runs the release build and checks against the declared version.
 2. The dry run on `main`: Actions → Release → "Run workflow", branch `main`, the tag to
    be (`v0.1.0`). It builds and checks exactly as a tag push does and keeps the zip

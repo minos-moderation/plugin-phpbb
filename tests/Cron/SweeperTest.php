@@ -189,7 +189,7 @@ final class SweeperTest extends TestCase
 		}
 	}
 
-	public function testSwitchedOffTheTaskIsIdleAndHeldPostsWaitForAModerator(): void
+	public function testSwitchedOffTheTaskOnlyForgetsAndHeldPostsWaitForAModerator(): void
 	{
 		$waiting = $this->board->posting('Pierwszy testowy wpis.')['post_id'];
 		$this->gateway->refuse(503, 'kolejka_niedostepna');
@@ -197,7 +197,7 @@ final class SweeperTest extends TestCase
 		$this->board->configure(array(settings::ENABLED => 0, settings::FAIL_MODE => settings::FAIL_OPEN));
 		$sweeper = $this->board->sweeper();
 
-		self::assertFalse($sweeper->is_runnable());
+		self::assertTrue($sweeper->is_runnable(), 'it still forgets after 30 days (A8)');
 		$sweeper->sweep(time() + 30 * 86400);
 
 		self::assertCount(2, $this->gateway->requests, 'no retry');
@@ -206,8 +206,40 @@ final class SweeperTest extends TestCase
 		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($waiting)['post_visibility']);
 		self::assertSame(array(), $this->board->visibility->calls);
 
-		$this->board->configure(array(settings::ENABLED => 1));
-		self::assertTrue($this->board->sweeper()->is_runnable(), 'switched on again, it picks up');
+	}
+
+	/**
+	 * Shared rule A8 (review C-3): the 30 days hold whatever the switch, as in the WordPress
+	 * and MyBB plugins; before, a switched-off extension kept the original of a masked post
+	 * and every verdict until it was switched on again.
+	 */
+	public function testSwitchedOffFinishedRowsAreStillForgottenAfterThirtyDays(): void
+	{
+		$this->board->configure(array(settings::CENSORED => settings::CENSORED_PUBLISH));
+		$masked = $this->board->posting('To jest brzydkie słowo w teście.')['post_id'];
+		$this->board->deliver(array('id' => 'phpbb:' . $masked, 'status' => 'ocenione', 'kwalifikacja' => 'ocenzurowane',
+			'kategorie' => array('wulgaryzmy'), 'wsparcie' => false,
+			'ocenzurowany' => $this->board->title($masked) . "\n\nTo jest ████████ słowo w teście."));
+		$held = $this->board->posting('Drugi testowy wpis.')['post_id'];
+		$this->board->deliver(array('id' => 'phpbb:' . $held, 'status' => 'ocenione', 'kwalifikacja' => 'zablokowane'));
+		$waiting = $this->board->posting('Trzeci testowy wpis.')['post_id'];
+		self::assertSame(pending_store::MASKED, $this->board->row($masked)['status'], 'the masked text applied');
+		self::assertNotSame('', (string) $this->board->row($masked)['original_text'], 'the original kept');
+		self::assertSame(pending_store::HELD, $this->board->row($held)['status']);
+		$this->board->configure(array(settings::ENABLED => 0));
+		$sweeper = $this->board->sweeper();
+
+		$sweeper->sweep(time() + 29 * 86400);
+		self::assertNotNull($this->board->row($masked), 'kept for 30 days');
+
+		$done = $sweeper->sweep(time() + 31 * 86400);
+
+		self::assertNull($this->board->row($masked), 'the original of the masked post is gone');
+		self::assertNull($this->board->row($held), 'the verdict is gone');
+		self::assertSame(2, $done['pruned']);
+		self::assertSame(pending_store::PENDING, $this->board->row($waiting)['status'], 'a waiting row is not a finished one');
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($waiting)['post_visibility']);
+		self::assertSame(0, $done['timed_out'], 'nothing but the forgetting while switched off');
 	}
 
 	public function testFinishedRowsAreForgottenAfterThirtyDaysAndWaitingOnesAreNot(): void
