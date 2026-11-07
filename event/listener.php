@@ -376,6 +376,10 @@ class listener implements EventSubscriberInterface
 		{
 			return 'MINOS_MCP_NO_TEXT';
 		}
+		if ($pending['error_code'] === submitter::ERROR_UNREADABLE)
+		{
+			return 'MINOS_MCP_UNREADABLE';
+		}
 		return ($pending['verdict'] !== '') ? 'MINOS_MCP_VERDICT_' . strtoupper((string) $pending['verdict']) : 'MINOS_MCP_HANDLED';
 	}
 }

@@ -164,6 +164,16 @@ final class RealFormatterFixtureTest extends TestCase
 		self::assertStringStartsWith('Stary', $text);
 	}
 
+	public function testPhpbbsXmlThatDoesNotParseIsNotReadAnotherWay(): void
+	{
+		// F7: a failed extraction, never phpBB 3.0's reading with the tags stripped.
+		$forum = Board::open()->forum;
+
+		self::assertNull($forum->plain_text('<r>zak<B><s>[b]</s>a</r>'));
+		self::assertNull($forum->plain_text('<t>a &amp b</t>'));
+		self::assertSame('a & b', $forum->plain_text('<t>a &amp; b</t>'), 'the control: the same text well formed');
+	}
+
 	public function testATextThePatternCannotReadIsNeverTakenForBlank(): void
 	{
 		// Not UTF-8 (phpBB 3.0's storage could hold anything): the blank check cannot read it,

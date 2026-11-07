@@ -91,6 +91,7 @@ class submitter
 	const ERROR_ANSWER = 'bad_answer';
 	const ERROR_REDIRECT = 'redirect';
 	const ERROR_EMPTY = 'empty_text';
+	const ERROR_UNREADABLE = 'unreadable_text';
 	const ERROR_NOT_CONFIGURED = 'not_configured';
 
 	/** @var settings */
@@ -289,7 +290,15 @@ class submitter
 			return null;
 		}
 		// The title is read from the topic on every attempt: what is sent is what a reader sees now.
-		$text = forum::first_chars($this->forum->text_of($post));
+		$whole = $this->forum->text_of($post);
+		if ($whole === null)
+		{
+			// phpBB's XML that does not parse: a failed extraction, not an empty text, and
+			// nothing - not the title, not the part that parsed - is sent in its place (F7).
+			$this->applier->fail($row, pending_store::VERDICT_REFUSED, self::ERROR_UNREADABLE, $now);
+			return null;
+		}
+		$text = forum::first_chars($whole);
 		if ($text === '')
 		{
 			// Nothing to assess: a post with only a link (the failure mode at once, shared rule

@@ -283,6 +283,12 @@ nowym tematem albo odpowiedzią z własnym
 tematem, w których poza tytułem nie ma tekstu: sam tytuł nigdy nie jest wysyłany. Sam cytat
 jest zwykłym tekstem: post zostaje wysłany i oceniony.
 
+Tak samo, od razu w trybie awarii i bez wysyłania czegokolwiek, kończy się post, którego
+zapisanego tekstu (albo ankiety) rozszerzenie nie potrafi odczytać, bo zapis phpBB jest
+uszkodzony; notatka w panelu moderatora: „nie udało się odczytać tekstu postu”. Do bramy nie
+trafia wtedy ani tytuł, ani odczytana część. Posty w starym formacie zapisu z phpBB 3.0
+(jeszcze nieprzekonwertowane) są odczytywane razem ze znacznikami i wysyłane do oceny.
+
 ## Czas do werdyktu i liczba werdyktów
 
 Strona ustawień pokazuje dla ostatnich 7 dni medianę (P50) i 95. percentyl (P95) czasu od

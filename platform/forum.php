@@ -20,6 +20,13 @@ namespace minos\moderation\platform;
  */
 class forum
 {
+	/**
+	 * How phpBB tells its stored XML from older storage (`generate_text_for_display()` in
+	 * `includes/functions_content.php`): a text that begins `<r>` or `<t>` (or either with
+	 * attributes) is the text formatter's XML.
+	 */
+	const XML_MARK = '#^<[rt][ >]#';
+
 	/** The longest text the gateway accepts, in characters. */
 	const MAX_CHARS = 3000;
 
@@ -228,11 +235,16 @@ class forum
 	 * file name inside it is not what a reader reads (the plugins' shared rule F7), so a post
 	 * of only such things has no text to assess. The text of `title` and `alt` attributes is
 	 * kept, after the text, when there is other text: words can hide there as well, but they
-	 * never make a text to assess alone. A stored text that is not phpBB's XML is read with
-	 * its markup, so that nothing in it is hidden. The text is NOT shortened here.
+	 * never make a text to assess alone. A stored text that is not phpBB's XML (phpBB 3.0's
+	 * storage, before the reparser converted it) is read with its markup, so that nothing in it
+	 * is hidden: a whole reading, with markup to spare. A text that is marked as phpBB's XML
+	 * ({@see XML_MARK}, phpBB's own test in `generate_text_for_display()`) but does not parse
+	 * is a failed extraction, not an empty text and not a text to read some other way (shared
+	 * rule F7): null, and the post gets the failure mode with nothing sent. The text is NOT
+	 * shortened here.
 	 *
 	 * @param string $xml The stored text (`post_text`).
-	 * @return string The plain text, trimmed.
+	 * @return string|null The plain text, trimmed; null when phpBB's XML cannot be read.
 	 */
 	public function plain_text($xml)
 	{
@@ -248,6 +260,10 @@ class forum
 		libxml_use_internal_errors($errors);
 		if (!$loaded || $dom->documentElement === null || $dom->doctype !== null)
 		{
+			if (preg_match(self::XML_MARK, $xml))
+			{
+				return null;
+			}
 			$text = html_entity_decode(strip_tags($xml), ENT_QUOTES, 'UTF-8');
 		}
 		else
@@ -393,7 +409,8 @@ class forum
 	 * text, as a post is.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
-	 * @return string The poll, or '' for none.
+	 * @return string|null The poll, or '' for none; null when a part of it cannot be read
+	 *     ({@see plain_text}).
 	 */
 	public function poll_of(array $post)
 	{
@@ -410,6 +427,10 @@ class forum
 			$lines[] = $this->plain_text((string) $row['poll_option_text']);
 		}
 		$this->db->sql_freeresult($result);
+		if (in_array(null, $lines, true))
+		{
+			return null;
+		}
 		return trim(implode("\n", array_filter($lines, 'strlen')));
 	}
 
@@ -417,15 +438,21 @@ class forum
 	 * The whole text the gateway reads for a post: its title ({@see title_of}), the poll it
 	 * carries ({@see poll_of}) and the post's plain text ({@see plain_text}), a blank line
 	 * between each two. A title alone is never sent: without text to assess in the post itself
-	 * or its poll, the result is ''. The text is NOT shortened here.
+	 * or its poll, the result is ''. When the post's text or its poll cannot be read, the
+	 * result is null: a failed extraction sends nothing in its place, not even the title or
+	 * the part that could be read (F7). The text is NOT shortened here.
 	 *
 	 * @param array<string,mixed> $post A row from {@see load_post}.
-	 * @return string
+	 * @return string|null
 	 */
 	public function text_of(array $post)
 	{
 		$text = $this->plain_text((string) $post['post_text']);
 		$poll = $this->poll_of($post);
+		if ($text === null || $poll === null)
+		{
+			return null;
+		}
 		if (self::is_blank($text) && self::is_blank($poll))
 		{
 			return '';
@@ -482,7 +509,8 @@ class forum
 		$raw = str_replace(array("\r\n", "\r"), "\n", (string) $this->text_utils->unparse((string) $post['post_text']));
 		$trimmed = preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $raw);
 		$text = $this->text_of($post);
-		if ($body === '' || $body !== (is_string($trimmed) ? $trimmed : trim($raw)) || self::first_chars($text) !== $text)
+		if ($body === null || $body === '' || $text === null || $body !== (is_string($trimmed) ? $trimmed : trim($raw))
+			|| self::first_chars($text) !== $text)
 		{
 			return null;
 		}

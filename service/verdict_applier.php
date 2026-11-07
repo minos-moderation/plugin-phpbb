@@ -199,7 +199,8 @@ class verdict_applier
 		{
 			$post = $this->forum->load_post($post_id);
 			$sent = (string) $row['sent_md5'];
-			$text = ($post !== null) ? $this->forum->text_of($post) : '';
+			// A text that cannot be read now (null) is no longer the text that was sent.
+			$text = ($post !== null) ? (string) $this->forum->text_of($post) : '';
 			// The gateway's outcome is about the text sent, and only that text: without its digest
 			// it is about no known text. The extension's own outcomes (no answer, a refusal) are
 			// about no text; a digest they have is still checked.

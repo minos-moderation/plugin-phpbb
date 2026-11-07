@@ -184,7 +184,14 @@ decision).
   `ATTACHMENT` and `FLASH` add no text (`forum::MEDIA_ELEMENTS`: their content is an address
   or a file name the reader does not read), and the `title`/`alt` attributes collected are
   added only beside other text, never alone (F7). A stored text
-  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing. The XML
+  that is not XML (phpBB 3.0's storage) is read with its markup, hiding nothing: a whole
+  reading with markup to spare, not a failed one. A text phpBB itself takes for its XML
+  (`forum::XML_MARK`, `#^<[rt][ >]#`, the test of `generate_text_for_display()`) that does
+  not parse is a failed extraction (F7, 2026-11-05): `plain_text` gives null, `text_of`
+  too (also for a poll's question or option), and the post gets the failure mode at once
+  with `error_code` `unreadable_text` ("nie udało się odczytać tekstu postu" in the MCP),
+  nothing sent - not the title, not the part that parsed. Before, it was read as phpBB
+  3.0's storage, its tags stripped, and sent (`ListenerTest`, `RealFormatterFixtureTest`). The XML
   parser is PHP's DOM, which phpBB 3.3 itself requires (its text formatter does).
 - **A refusal that outlasts the wait is the failure mode at once** (the plugins' shared rule
   D9.3(a)): when `ponow_za_s`, taken as sent (not shortened to the retry cap), ends after a
