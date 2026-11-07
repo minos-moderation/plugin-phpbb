@@ -363,7 +363,7 @@ The rules every Minos plugin shares are client-php's `docs/plugin-behaviour.md`;
 entries above say how this extension carries them out. This table maps every identifier (D1)
 to the code and the tests that implement it, to an `odstępstwo` with the issue that closes
 it, or to an optional rule left out. It follows the rules as client-php's `main` states
-them, F10 and the 2026-11-05 wording (F7, S1, S2, S3, A7) included, which its next tag
+them, F10 and the 2026-11-05 wording (F7, S1, S2, S3, A7, D1) included, which its next tag
 carries; the lock is at `v0.2.0`.
 
 | Id | In short | phpBB: mechanism, or deviation |
