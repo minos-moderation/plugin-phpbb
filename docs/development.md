@@ -515,11 +515,13 @@ same without phpBB.
 
 ## Composer
 
-`composer.json` requires `minos-moderation/client-php` at `dev-main` from its GitHub
-repository; `composer.lock` pins the commit: `e5df7d6d`, client-php's `main` with 0.2.0
-(`Signature::check`). When `client-php` is tagged `v0.2.0`, `dev-main` becomes `^0.2`. The
-lock moves only with a reviewed `composer update minos-moderation/client-php`, in a commit of
-its own. The extension never forks the client's verification.
+`composer.json` requires `minos-moderation/client-php` at `^0.2` from its GitHub
+repository (a `vcs` repository entry: the client is not on Packagist); `composer.lock` pins
+the tag: `v0.2.0`, commit `e5df7d6d` (`Signature::check`). Moving to a newer client is a
+pull request of its own with a reviewed `composer update minos-moderation/client-php` to a
+tag (widen the constraint first when the tag is outside `^0.2`), whose lock diff shows only
+that package's entry and the content hash; never a commit of the client's `main`. The
+extension never forks the client's verification.
 
 phpBB 3.3 requires an enabled extension's `vendor/autoload.php` when there is one
 (`di\container_builder`; seen on the live board). The package ships none: a second Composer
