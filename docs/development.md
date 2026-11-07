@@ -265,7 +265,9 @@ decision).
   delivery is dropped before it (the row is no longer `received`). Any other refusal (the
   post gone, a check another extension adds on `core.report_post_auth` after this one) leaves
   the post published and writes `LOG_MINOS_SUPPORT_REPORT_FAILED` into the error log: the
-  post's id and phpBB's code (a language key, else the exception's class), never its text. The report keeps phpBB's
+  post's id and phpBB's code (a language key, else the exception's class), never its text;
+  so does a board that lacks the reason "other" or the guest's account (codes
+  `NO_REASON_OTHER`, `NO_GUEST_USER`; before, that report failed without a trace). The report keeps phpBB's
   copy of the post as reported, as every report does, under the forum's rules (A8).
   **The signal comes also after a person decided** (A7's "whatever the verdict"; the owner's
   decision of 2026-11-01: the person's decision is about the post's visibility, not about

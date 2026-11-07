@@ -788,6 +788,36 @@ final class WebhookTest extends TestCase
 			'the post and phpBB\'s code, nothing of its text');
 	}
 
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function missingReportPrerequisites(): array
+	{
+		return array(
+			'no reason "other"'   => array("DELETE FROM phpbb_reports_reasons WHERE LOWER(reason_title) = 'other'", 'NO_REASON_OTHER'),
+			'no guest account'    => array('DELETE FROM phpbb_users WHERE user_id = ' . ANONYMOUS, 'NO_GUEST_USER'),
+		);
+	}
+
+	/**
+	 * @dataProvider missingReportPrerequisites
+	 */
+	public function testAReportThatCannotBeFiledForWantOfTheBoardsDataIsInTheErrorLog(string $sql, string $code): void
+	{
+		// Before: report_support returned false without a trace, and the signal vanished.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->board->db->sql_query($sql);
+
+		self::assertSame(200, $this->board->deliver(self::verdict($id, 'bezpieczne', array('wsparcie' => true))));
+
+		self::assertSame(ITEM_APPROVED, (int) $this->board->post($id)['post_visibility'], 'published all the same');
+		self::assertSame(array(), $this->board->reports->of($id));
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'), 'the moderator log has the signal');
+		$failures = $this->board->log->of('LOG_MINOS_SUPPORT_REPORT_FAILED');
+		self::assertCount(1, $failures, 'the lost report is in the error log');
+		self::assertSame(array('critical', array($id, $code)), array($failures[0]['mode'], $failures[0]['data']));
+	}
+
 	public function testOnlyTheExtensionsOwnReportSkipsPhpbbsPermissionCheck(): void
 	{
 		// The board's users have no `f_report` here, as phpBB's guests by default.

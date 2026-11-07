@@ -851,7 +851,8 @@ class forum
 	 * A post that already has an open report (phpBB refuses a second one) is in the moderators'
 	 * reports already, and is not reported again. Any other refusal (the post gone, a check
 	 * another extension adds on `core.report_post_auth`) loses the signal: the error log says so
-	 * ({@see log_report_refusal}).
+	 * ({@see log_report_refusal}), as it does when the board has no reason "other" or no guest
+	 * account to file the report with (codes `NO_REASON_OTHER`, `NO_GUEST_USER`).
 	 *
 	 * @param array<string,mixed> $post    A row from {@see load_post}.
 	 * @param string              $verdict The gateway's verdict, named in the report.
@@ -873,6 +874,10 @@ class forum
 		$this->db->sql_freeresult($result);
 		if (!$reason || !$guest || $post_id <= 0)
 		{
+			// Never silent: without the reason "other" (phpBB refuses to delete it, but a
+			// database may lack it) or the guest's account no report can be filed.
+			$this->log->add('critical', ANONYMOUS, '', 'LOG_MINOS_SUPPORT_REPORT_FAILED', false,
+				array($post_id, !$reason ? 'NO_REASON_OTHER' : (!$guest ? 'NO_GUEST_USER' : 'NO_POST')));
 			return false;
 		}
 		$this->language->add_lang('common', 'minos/moderation');
