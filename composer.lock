@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2a69fa8d60a98a17346177c7afdb8f4a",
+    "content-hash": "e310e3e75d7234bcd2e41a591a2bdf0d",
     "packages": [
         {
             "name": "minos-moderation/client-php",

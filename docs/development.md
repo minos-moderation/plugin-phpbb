@@ -541,7 +541,7 @@ The version lives in ONE place the release workflow checks: `"version"` in `comp
 keeps no changelog; the release notes are GitHub's generated ones. The workflow, not a
 person, creates the release, and only after its checks pass.
 
-1. Set `"version"` in `composer.json` to the release (`0.1.0-dev` → `0.1.0`) in a pull request, and merge it. On every pull request the `release-archive` job
+1. Set `"version"` in `composer.json` to the release (it reads `0.1.0`, the first release) in a pull request, and merge it. On every pull request the `release-archive` job
    of `tests.yml` already runs the release build and checks against the declared version.
 2. The dry run on `main`: Actions → Release → "Run workflow", branch `main`, the tag to
    be (`v0.1.0`). It builds and checks exactly as a tag push does and keeps the zip

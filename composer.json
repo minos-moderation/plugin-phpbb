@@ -3,7 +3,7 @@
     "type": "phpbb-extension",
     "description": "Sends new phpBB posts to the Wergiliusz gateway (Minos) and applies the verdict delivered to a signed webhook.",
     "homepage": "https://github.com/minos-moderation/plugin-phpbb",
-    "version": "0.1.0-dev",
+    "version": "0.1.0",
     "license": "GPL-2.0-only",
     "authors": [
         {
