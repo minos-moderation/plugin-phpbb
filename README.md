@@ -336,8 +336,9 @@ Co 5 minut rozszerzenie stosuje tryb awarii do postów, na które werdykt nie na
 czasie, wysyła posty, które na to czekają (paczkami do 20; po pierwszej odpowiedzi bramy
 „poczekaj” — `429`, `503`, brak połączenia — nie wysyła kolejnych paczek), i usuwa własne
 wpisy 30 dni po rozstrzygnięciu — także wtedy, gdy ocenianie jest wyłączone w ustawieniach:
-z wpisem znikają zapisany werdykt i oryginał zamaskowanego postu (to wszystkie dane, które
-rozszerzenie przechowuje o poście). Wpisy w dzienniku
+z wpisem znika wszystko, co rozszerzenie przechowuje o poście: werdykt bramy z kategoriami
+i sygnałem `wsparcie`, zamaskowany tekst od bramy, oryginał zamaskowanego postu, skróty
+(MD5) wysłanego i opublikowanego tekstu, kod błędu oraz stan i czasy oceny. Wpisy w dzienniku
 moderatorów phpBB (temat postu, decyzja rozszerzenia, sygnał `wsparcie`) i zgłoszenia
 rozszerzenia w panelu moderatora (z kopią postu, którą phpBB zachowuje przy każdym
 zgłoszeniu) zostają: to rejestry forum, przechowywane według zasad forum. Na forach o małym
