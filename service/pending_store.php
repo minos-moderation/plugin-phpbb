@@ -456,9 +456,12 @@ class pending_store
 
 	/**
 	 * Claims the signal of `wsparcie` that a verdict for an earlier revision carries (the post
-	 * was edited since, so the verdict itself is not applied): true once per post and revision,
-	 * and only for a revision older than the row's. A later claim for the same or an older
-	 * revision finds `support_signalled` there already.
+	 * was edited since, so the verdict itself is not applied): true only for a revision older
+	 * than the row's, and only when no verdict for that revision or a later one was signalled
+	 * (`support_signalled` = the newest signalled revision + 1). The claim moves forward only,
+	 * a decision rather than an oversight: once the moderators have the signal about a text
+	 * before an edit, a verdict for a text further back adds none (the post is in their reports
+	 * already; phpBB keeps one open report per post), while a newer revision's is still raised.
 	 *
 	 * @param int $post_id  The post.
 	 * @param int $revision The revision the verdict is about.

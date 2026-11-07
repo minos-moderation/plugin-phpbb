@@ -197,6 +197,30 @@ final class SupportAfterDecisionTest extends TestCase
 		self::assertSame(pending_store::PUBLISHED, $this->board->row($id)['status']);
 	}
 
+	public function testAnOlderRevisionsSupportAfterANewerOnesAddsNoSecondSignal(): void
+	{
+		// The decision on the order (S6e minor 2): the claim moves forward only. Once the
+		// moderators have the signal for a text before an edit, a verdict for a text further
+		// back adds none - the post is in their reports already, and phpBB keeps one open
+		// report per post. A newer revision's after an older one's is still raised.
+		$id = $this->pending('Testowy wpis o bardzo złym dniu.');
+		$this->board->edit($id, 'Pierwsza poprawka wpisu testowego.');
+		$this->board->edit($id, 'Druga poprawka wpisu testowego.');
+		self::assertSame('2', (string) $this->board->row($id)['revision']);
+
+		self::assertSame(200, $this->board->deliver(array('id' => 'phpbb:' . $id . '.1') + $this->verdict($id, 'zablokowane', true)));
+		self::assertCount(1, $this->board->reports->of($id));
+		$this->board->db->sql_query('UPDATE phpbb_reports SET report_closed = 1 WHERE post_id = ' . $id);
+		$this->board->db->sql_query('UPDATE phpbb_posts SET post_reported = 0 WHERE post_id = ' . $id);
+
+		self::assertSame(200, $this->board->deliver($this->verdict($id, 'zablokowane', true)));
+
+		self::assertCount(1, $this->board->reports->of($id), 'no second report for the older text');
+		self::assertCount(1, $this->board->log->of('LOG_MINOS_SUPPORT'));
+		self::assertSame('2', (string) $this->board->row($id)['support_signalled']);
+		self::assertSame(ITEM_UNAPPROVED, (int) $this->board->post($id)['post_visibility']);
+	}
+
 	public function testAVerdictWithoutSupportForTheTextBeforeAnEditSignalsNothing(): void
 	{
 		$id = $this->pending('Testowy wpis o bardzo złym dniu.');

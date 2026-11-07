@@ -282,6 +282,10 @@ decision).
   (`pending_store::claim_earlier_support`, the `support_signalled` column of migration
   `support_signal`: that revision + 1) in one transaction with the report, before the
   webhook's answer, so a failure rolls both back and the gateway's next delivery tries again.
+  The claim moves forward only, by decision: a verdict for an older revision that arrives
+  after a newer revision's signal adds no second one (the moderators have the post in their
+  reports for a text before an edit already, and phpBB keeps one open report per post);
+  a newer revision's after an older one's is raised (`SupportAfterDecisionTest`).
   An edit that overtakes a verdict already recorded but not yet applied (the row
   `received`: the webhook applies after its answer, the cron task after a stop) drops that
   verdict as well, and its `wsparcie` is raised at once, in the editing request, as for a
